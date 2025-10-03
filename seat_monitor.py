@@ -375,6 +375,23 @@ class SeatMonitor:
             
             print("座位监控系统已关闭")
 
+def main():
+    """主函数，程序的入口点"""
+    try:
+        # 创建座位监控实例
+        monitor = SeatMonitor()
+        # 运行监控系统
+        monitor.run()
+    except Exception as e:
+        print(f"程序运行出错: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return 1
+    return 0
+
 if __name__ == "__main__":
-    monitor = SeatMonitor()
-    monitor.run()
+    # 调用主函数并设置返回码
+    exit_code = main()
+    # 退出程序，返回相应的退出码
+    import sys
+    sys.exit(exit_code)

@@ -1,0 +1,53 @@
+{
+  "camera": {
+    "resolution": {
+      "width": 1280,
+      "height": 720
+    },
+    "framerate": 10,
+    "rotation": 0
+  },
+  "detection": {
+    "motion_threshold": 10000,
+    "face_recognition_tolerance": 0.6,
+    "detection_interval": 0.1
+  },
+  "seats": [
+    {
+      "id": 1,
+      "name": "座位1",
+      "region": [
+        [100, 150],
+        [300, 150],
+        [300, 350],
+        [100, 350]
+      ]
+    },
+    {
+      "id": 2,
+      "name": "座位2",
+      "region": [
+        [350, 150],
+        [550, 150],
+        [550, 350],
+        [350, 350]
+      ]
+    },
+    {
+      "id": 3,
+      "name": "座位3",
+      "region": [
+        [600, 150],
+        [800, 150],
+        [800, 350],
+        [600, 350]
+      ]
+    }
+  ],
+  "data": {
+    "save_interval": 60,
+    "reports_directory": "reports",
+    "data_directory": "data",
+    "known_faces_directory": "known_faces"
+  }
+}

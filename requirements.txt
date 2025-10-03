@@ -1,0 +1,7 @@
+opencv-python
+picamera2
+numpy
+pandas
+datetime
+matplotlib
+face_recognition

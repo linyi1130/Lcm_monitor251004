@@ -360,59 +360,44 @@ class SeatMonitor:
         if static_contours and len(static_contours) > 0:
             all_contours.extend(static_contours)
         
-        # 检查是否有足够大的轮廓（可能是人体） - 超级简化版本
+        # 简化版检测逻辑 - 特别优化离开检测
         person_detected = False
-        # 重新计算静态最小面积阈值用于调试显示
-        static_person_min_area_ratio = self.config['detection'].get('static_person_min_area_ratio', 0.01)
-        min_static_area = max(min_area * 0.01, roi_area * static_person_min_area_ratio * 0.01)
-        print(f"ROI尺寸: {w}x{h}, 最小面积阈值: {min_area * 0.01:.1f}, 静态最小面积阈值: {min_static_area:.1f}, 检测到轮廓数量: {len(all_contours)}")  # 调试信息
         
-        # 超级简化的检测模式：几乎任何轮廓都被认为是人体
-        # 1. 首先检查前景掩码和静态阈值结果
-        # 调整阈值，减少背景误判
-        fg_area_threshold = w*h*0.01  # 提高至1%的ROI面积 - 减少误报
-        static_area_threshold = w*h*0.02  # 提高至2%的ROI面积
+        # 计算ROI面积
+        roi_area = w * h
         
-        # 2. 检查是否有足够的前景或静态区域（主要检测手段）
-        if (fg_mask is not None and cv2.countNonZero(fg_mask) > fg_area_threshold) or \
-           (static_detection_enabled and static_area > static_area_threshold):
-            # 增加轮廓面积验证，过滤掉小的背景干扰
-            valid_contours = []
-            for contour in all_contours:
-                area = cv2.contourArea(contour)
-                if area > fg_area_threshold:
-                    valid_contours.append(contour)
+        # 设置合理的检测阈值
+        fg_area_threshold = w*h*0.02  # 适当提高阈值，减少离开后的误报
+        static_area_threshold = w*h*0.03
+        
+        # 1. 检查前景掩码结果 - 主要用于检测人员离开
+        if fg_mask is not None:
+            fg_area = cv2.countNonZero(fg_mask)
+            print(f"前景面积: {fg_area}, 阈值: {fg_area_threshold}")
             
-            if len(valid_contours) > 0:
-                person_detected = True
-                print(f"主要检测: 检测到足够的前景或静态区域（前景>{fg_area_threshold},静态>{static_area_threshold}）和有效轮廓，认为检测到人")
+            # 只有当前景面积明显大于阈值时才认为有人
+            if fg_area > fg_area_threshold:
+                # 额外检查：确保有足够大的连通区域
+                num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(fg_mask)
+                large_components = 0
+                for i in range(1, num_labels):
+                    if stats[i, cv2.CC_STAT_AREA] > fg_area_threshold * 0.5:
+                        large_components += 1
+                
+                if large_components > 0:
+                    person_detected = True
+                    print(f"前景检测: 检测到{large_components}个大连通区域，认为有人")
+            else:
+                print("前景检测: 前景面积小于阈值，认为无人")
         
-        # 3. 轮廓验证：只有足够大的轮廓才认为检测到人
-        if not person_detected:
-            valid_contours = []
-            for contour in all_contours:
-                area = cv2.contourArea(contour)
-                if area > fg_area_threshold:
-                    valid_contours.append(contour)
-                    
-            if len(valid_contours) > 0:
+        # 2. 静态检测作为补充，但不作为主要判断依据
+        if not person_detected and static_detection_enabled:
+            print(f"静态面积: {static_area}, 阈值: {static_area_threshold}")
+            if static_area > static_area_threshold:
                 person_detected = True
-                print(f"轮廓检测: 检测到{len(valid_contours)}个有效轮廓（面积>{fg_area_threshold}），认为检测到人")
-        
-        # 4. 基于色彩的检测补充：检查ROI中是否有明显的肤色区域
-        if not person_detected and roi.size > 0:
-            # 转换到HSV色彩空间
-            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-            # 定义更宽泛的肤色范围
-            lower_skin = np.array([0, 10, 60], dtype=np.uint8)
-            upper_skin = np.array([30, 255, 255], dtype=np.uint8)
-            # 创建肤色掩码
-            skin_mask = cv2.inRange(hsv, lower_skin, upper_skin)
-            skin_area = cv2.countNonZero(skin_mask)
-            # 如果肤色面积超过ROI的0.2%，认为检测到人
-            if skin_area > w*h*0.002:
-                person_detected = True
-                print(f"肤色检测: 检测到肤色区域（面积={skin_area}），认为检测到人")
+                print(f"静态检测: 静态面积大于阈值，认为有人")
+            else:
+                print("静态检测: 静态面积小于阈值，认为无人")
         
         # 5. 智能确认模式：平衡误报和漏报
         # 改进逻辑，避免将背景误判为人
@@ -438,24 +423,15 @@ class SeatMonitor:
                             print("智能过滤: 检测到变化但未通过连通区域验证，可能是背景噪声，过滤误报")
             else:
                 # 已占用状态：保持已有的检测结果，但增加离开确认
+                # 注意：离开确认的主要逻辑在update_occupancy_status方法中实现
+                # 这里不再使用单独的departure_counter，统一使用leave_counters
                 if not person_detected:
-                    # 连续多帧未检测到人才认为离开
-                    if hasattr(self, 'departure_counter') and seat_id in self.departure_counter:
-                        self.departure_counter[seat_id] += 1
-                    else:
-                        self.departure_counter = {seat_id: 1}
-                    
-                    # 需要连续3帧未检测到人才确认离开
-                    if self.departure_counter[seat_id] < 3:
-                        person_detected = True  # 暂时保持有人状态
-                        print(f"离开确认: 未检测到人但需连续确认 ({self.departure_counter[seat_id]}/3)")
-                    else:
-                        self.departure_counter[seat_id] = 0  # 重置计数器
-                        print("状态保持: 确认无人，保持当前检测结果")
+                    # 简化处理，直接返回未检测到人的结果
+                    # 详细的离开确认逻辑在update_occupancy_status中处理
+                    print("已占用状态下未检测到人，将在update_occupancy_status中进行离开确认")
                 else:
-                    # 检测到人，重置离开计数器
-                    if hasattr(self, 'departure_counter'):
-                        self.departure_counter[seat_id] = 0
+                    # 检测到人，通过update_occupancy_status中的逻辑重置计数器
+                    pass
         
         # 简化版：只检测是否有人，不进行人脸识别
         person_id = "有人" if person_detected else None
@@ -501,10 +477,11 @@ class SeatMonitor:
                     # 已经记录为有人，增加离开计数器
                     self.leave_counters[seat_id] += 1
                     
-                    # 设置连续检测到离开的帧数阈值，降低阈值以更快识别人员离开
-                    # 优化：从配置中读取，默认设为较低值以提高响应速度
-                    leave_threshold = self.config['detection'].get('leave_detection_threshold', 5)
+                    # 进一步降低离开检测阈值，提高离开检测的灵敏度
+                    # 默认值设置为非常低，确保人员离开能被及时识别
+                    leave_threshold = self.config['detection'].get('leave_detection_threshold', 3)
                     print(f"座位{seat_id}离开计数: {self.leave_counters[seat_id]}/{leave_threshold}")  # 调试信息
+                    print(f"离开检测增强模式: 座位{seat_id} - 当前状态已占用但未检测到人")
                     
                     # 增强型检测：如果检测到明显的场景变化（如大面积区域变为背景），提前确认离开
                     # 直接计算前景区域，无需调用外部方法

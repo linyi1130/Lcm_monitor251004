@@ -167,8 +167,10 @@ class SeatMonitor:
             if hasattr(self.back_sub, 'setShadowThreshold'):
                 self.back_sub.setShadowThreshold(0.7)  # 提高阴影阈值，减少阴影误判
             
-            # 调整学习率，平衡背景更新速度和稳定性
-            self.bg_learning_rate = 0.0005  # 稍微提高学习率，帮助适应背景变化
+            # 调整学习率，增强背景更新速度以改善离开检测
+            self.bg_learning_rate = 0.002  # 显著提高学习率，帮助系统更快适应人员离开后的背景变化
+            # 离开检测专用的临时高学习率
+            self.leave_detection_learning_rate = 0.01
             
             print(f"背景减除器初始化成功（平衡模式）: 历史帧={history}, 方差阈值={var_threshold}, 学习率={self.bg_learning_rate}")
         except Exception as e:
@@ -376,7 +378,12 @@ class SeatMonitor:
             print(f"前景面积: {fg_area}, 阈值: {fg_area_threshold}")
             
             # 只有当前景面积明显大于阈值时才认为有人
-            if fg_area > fg_area_threshold:
+            # 动态调整阈值：如果当前状态是已占用，则适当降低阈值以保持检测灵敏度
+            dynamic_threshold = fg_area_threshold
+            if seat_id in self.occupancy_status and self.occupancy_status[seat_id]['occupied']:
+                dynamic_threshold = fg_area_threshold * 0.7  # 已占用状态下降低30%阈值
+            
+            if fg_area > dynamic_threshold:
                 # 额外检查：确保有足够大的连通区域
                 num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(fg_mask)
                 large_components = 0
@@ -494,14 +501,31 @@ class SeatMonitor:
                         h = max([p[1] for p in region]) - y
                         roi = frame[y:y+h, x:x+w].copy()
                         if roi.size > 0:
-                            # 计算前景区域
-                            fg_mask = self.back_sub.apply(roi, learningRate=0)
+                            # 计算前景区域，使用临时高学习率加速背景更新
+                            fg_mask = self.back_sub.apply(roi, learningRate=self.leave_detection_learning_rate)
                             _, fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
                             fg_area = cv2.countNonZero(fg_mask)
                             print(f"增强型检测 - 前景面积: {fg_area}")
+                            
+                            # 额外检查：计算静态面积，进一步确认是否真的没有人
+                            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                            blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+                            thresh = cv2.adaptiveThreshold(blurred, 255,
+                                                           cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                                           cv2.THRESH_BINARY_INV, 7, 1)
+                            static_area = cv2.countNonZero(thresh)
+                            print(f"增强型静态检测 - 静态面积: {static_area}")
                     
-                    # 判断条件：达到阈值或前景区域为0且已连续2帧未检测到人
-                    if self.leave_counters[seat_id] >= leave_threshold or (fg_area == 0 and self.leave_counters[seat_id] >= 2):
+                    # 增强型离开确认逻辑：
+                    # 1. 达到离开阈值
+                    # 2. 前景区域为0且已连续2帧未检测到人
+                    # 3. 静态面积显著减小（相比之前记录的最大值减少80%以上）
+                    is_foreground_clear = fg_area == 0 or fg_area < fg_area_threshold * 0.2
+                    is_static_area_low = static_area < static_area_threshold * 0.3  # 静态面积也很小
+                    
+                    if (self.leave_counters[seat_id] >= leave_threshold or 
+                        (is_foreground_clear and self.leave_counters[seat_id] >= 2) or
+                        (is_foreground_clear and is_static_area_low)):
                         print("增强型离开检测触发：快速确认人员离开")
                         # 确认人离开
                         self.occupancy_status[seat_id]['occupied'] = False

@@ -24,6 +24,10 @@ class SeatMonitor:
         # 加载配置文件
         self.config = self.load_config(config_file)
         
+        # 初始化日志系统
+        self.log_file = None
+        self.initialize_logging()
+        
         # 初始化摄像头
         print("初始化摄像头...")
         self.camera = Picamera2()
@@ -148,9 +152,9 @@ class SeatMonitor:
         """初始化背景减除器，平衡敏感性和稳定性"""
         try:
             # 获取配置参数 - 优化以减少背景误判
-            history = self.config['detection'].get('back_sub_history', 500)  # 适中的历史记录
-            var_threshold = self.config['detection'].get('back_sub_var_threshold', 15)  # 提高阈值，减少误报
-            var_threshold_gen = self.config['detection'].get('back_sub_var_threshold_gen', 10)
+            history = self.config['detection'].get('back_sub_history', 300)  # 降低历史记录，加快适应新环境
+            var_threshold = self.config['detection'].get('back_sub_var_threshold', 10)  # 降低阈值，提高检测灵敏度
+            var_threshold_gen = self.config['detection'].get('back_sub_var_threshold_gen', 5)
             
             # 创建背景减除器
             self.back_sub = cv2.createBackgroundSubtractorMOG2(
@@ -165,17 +169,48 @@ class SeatMonitor:
             
             # 设置阴影阈值，改善阴影处理
             if hasattr(self.back_sub, 'setShadowThreshold'):
-                self.back_sub.setShadowThreshold(0.7)  # 提高阴影阈值，减少阴影误判
+                self.back_sub.setShadowThreshold(0.6)  # 适当降低阴影阈值
             
             # 调整学习率，增强背景更新速度以改善离开检测
-            self.bg_learning_rate = 0.002  # 显著提高学习率，帮助系统更快适应人员离开后的背景变化
+            self.bg_learning_rate = 0.005  # 大幅提高学习率，帮助系统更快适应人员离开后的背景变化
             # 离开检测专用的临时高学习率
-            self.leave_detection_learning_rate = 0.01
+            self.leave_detection_learning_rate = 0.03
             
             print(f"背景减除器初始化成功（平衡模式）: 历史帧={history}, 方差阈值={var_threshold}, 学习率={self.bg_learning_rate}")
+            self.log_message(f"背景减除器初始化成功: 历史帧={history}, 方差阈值={var_threshold}, 学习率={self.bg_learning_rate}")
         except Exception as e:
-            print(f"初始化背景减除器失败: {str(e)}")
+            error_msg = f"初始化背景减除器失败: {str(e)}"
+            print(error_msg)
+            self.log_message(error_msg)
             self.back_sub = None
+            
+    def initialize_logging(self):
+        """初始化日志系统"""
+        try:
+            log_dir = "logs"
+            if not os.path.exists(log_dir):
+                os.makedirs(log_dir)
+            
+            current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.log_file = os.path.join(log_dir, f"seat_monitor_{current_time}.log")
+            print(f"日志文件已创建: {self.log_file}")
+            
+            # 写入日志头部
+            with open(self.log_file, 'a', encoding='utf-8') as f:
+                f.write(f"===== 座位监控系统日志 - {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} =====\n")
+        except Exception as e:
+            print(f"初始化日志系统失败: {str(e)}")
+            self.log_file = None
+            
+    def log_message(self, message):
+        """写入日志消息"""
+        if self.log_file:
+            try:
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                with open(self.log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"[{timestamp}] {message}\n")
+            except Exception as e:
+                print(f"写入日志失败: {str(e)}")
         
     def initialize_monitor_region(self):
         """Interactive monitor region initialization, user selects four points with mouse"""
@@ -493,19 +528,28 @@ class SeatMonitor:
                     # 增强型检测：如果检测到明显的场景变化（如大面积区域变为背景），提前确认离开
                     # 直接计算前景区域，无需调用外部方法
                     fg_area = 0
+                    fg_area_threshold = 0
+                    static_area = 0
+                    static_area_threshold = 0
+                    
+                    # 计算ROI面积和阈值
+                    x = min([p[0] for p in region])
+                    y = min([p[1] for p in region])
+                    w = max([p[0] for p in region]) - x
+                    h = max([p[1] for p in region]) - y
+                    roi_area = w * h
+                    fg_area_threshold = roi_area * 0.02  # 使用固定的2%作为阈值
+                    static_area_threshold = roi_area * 0.03
+                    
                     if hasattr(self, 'back_sub') and self.back_sub is not None:
-                        # 提取感兴趣区域
-                        x = min([p[0] for p in region])
-                        y = min([p[1] for p in region])
-                        w = max([p[0] for p in region]) - x
-                        h = max([p[1] for p in region]) - y
                         roi = frame[y:y+h, x:x+w].copy()
                         if roi.size > 0:
                             # 计算前景区域，使用临时高学习率加速背景更新
                             fg_mask = self.back_sub.apply(roi, learningRate=self.leave_detection_learning_rate)
                             _, fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
                             fg_area = cv2.countNonZero(fg_mask)
-                            print(f"增强型检测 - 前景面积: {fg_area}")
+                            print(f"增强型检测 - 前景面积: {fg_area}, 阈值: {fg_area_threshold}")
+                            self.log_message(f"座位{seat_id} - 增强型检测 - 前景面积: {fg_area}, 阈值: {fg_area_threshold}")
                             
                             # 额外检查：计算静态面积，进一步确认是否真的没有人
                             gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
@@ -514,19 +558,36 @@ class SeatMonitor:
                                                            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                                            cv2.THRESH_BINARY_INV, 7, 1)
                             static_area = cv2.countNonZero(thresh)
-                            print(f"增强型静态检测 - 静态面积: {static_area}")
+                            print(f"增强型静态检测 - 静态面积: {static_area}, 阈值: {static_area_threshold}")
+                            self.log_message(f"座位{seat_id} - 增强型静态检测 - 静态面积: {static_area}, 阈值: {static_area_threshold}")
                     
                     # 增强型离开确认逻辑：
                     # 1. 达到离开阈值
-                    # 2. 前景区域为0且已连续2帧未检测到人
-                    # 3. 静态面积显著减小（相比之前记录的最大值减少80%以上）
-                    is_foreground_clear = fg_area == 0 or fg_area < fg_area_threshold * 0.2
-                    is_static_area_low = static_area < static_area_threshold * 0.3  # 静态面积也很小
+                    # 2. 前景区域很小且已连续几帧未检测到人
+                    # 3. 前景和静态区域都很小
+                    is_foreground_clear = fg_area < fg_area_threshold * 0.3  # 前景面积小于阈值30%即认为清空
+                    is_static_area_low = static_area < static_area_threshold * 0.4  # 静态面积小于阈值40%即认为很低
                     
+                    # 记录当前状态到日志
+                    self.log_message(f"座位{seat_id} - 离开计数: {self.leave_counters[seat_id]}/{leave_threshold}, 前景清空: {is_foreground_clear}, 静态面积低: {is_static_area_low}")
+                    
+                    # 简化并增强离开检测条件
+                    # 条件1: 达到离开阈值
+                    # 条件2: 前景清空且已连续2帧未检测到人
+                    # 条件3: 前景清空且静态面积很低
                     if (self.leave_counters[seat_id] >= leave_threshold or 
                         (is_foreground_clear and self.leave_counters[seat_id] >= 2) or
                         (is_foreground_clear and is_static_area_low)):
-                        print("增强型离开检测触发：快速确认人员离开")
+                        trigger_reason = "未知原因"
+                        if self.leave_counters[seat_id] >= leave_threshold:
+                            trigger_reason = f"离开计数达到阈值({self.leave_counters[seat_id]}/{leave_threshold})"
+                        elif is_foreground_clear and self.leave_counters[seat_id] >= 2:
+                            trigger_reason = f"前景清空且连续2帧未检测到人(前景面积={fg_area})"
+                        else:
+                            trigger_reason = f"前景清空且静态面积低(前景={fg_area},静态={static_area})"
+                            
+                        print(f"增强型离开检测触发：{trigger_reason}")
+                        self.log_message(f"座位{seat_id} - 增强型离开检测触发: {trigger_reason}")
                         # 确认人离开
                         self.occupancy_status[seat_id]['occupied'] = False
                         self.occupancy_status[seat_id]['exit_time'] = current_time

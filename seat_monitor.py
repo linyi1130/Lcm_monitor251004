@@ -145,12 +145,12 @@ class SeatMonitor:
         pass
         
     def initialize_background_subtractor(self):
-        """初始化背景减除器，平衡静态和动态人体检测"""
+        """初始化背景减除器，专门为静态人体检测优化"""
         try:
-            # 获取配置参数 - 优化整体检测灵敏度
-            history = self.config['detection'].get('back_sub_history', 300)  # 适中的历史记录
-            var_threshold = self.config['detection'].get('back_sub_var_threshold', 10)  # 降低阈值，提高敏感度
-            var_threshold_gen = self.config['detection'].get('back_sub_var_threshold_gen', 9)
+            # 获取配置参数 - 为静态检测优化
+            history = self.config['detection'].get('back_sub_history', 1000)  # 增加历史记录
+            var_threshold = self.config['detection'].get('back_sub_var_threshold', 5)  # 大幅降低阈值，提高敏感度
+            var_threshold_gen = self.config['detection'].get('back_sub_var_threshold_gen', 4)
             
             # 创建背景减除器
             self.back_sub = cv2.createBackgroundSubtractorMOG2(
@@ -165,12 +165,12 @@ class SeatMonitor:
             
             # 设置阴影阈值，改善阴影处理
             if hasattr(self.back_sub, 'setShadowThreshold'):
-                self.back_sub.setShadowThreshold(0.7)  # 增加阴影阈值，更好地识别阴影中的人体
+                self.back_sub.setShadowThreshold(0.5)  # 降低阴影阈值，更好地捕获静态人体
             
-            # 配置学习率，提高背景更新速度以适应人员移动
-            self.bg_learning_rate = self.config['detection'].get('bg_learning_rate', 0.01)  # 提高学习率，使背景模型能够快速适应场景变化
+            # 强制降低学习率，防止静态人员被视为背景
+            self.bg_learning_rate = 0.00001  # 极低的学习率
             
-            print("背景减除器初始化成功（已优化人体检测灵敏度）")
+            print(f"背景减除器初始化成功（静态检测优化）: 历史帧={history}, 方差阈值={var_threshold}, 学习率={self.bg_learning_rate}")
         except Exception as e:
             print(f"初始化背景减除器失败: {str(e)}")
             self.back_sub = None
@@ -278,33 +278,17 @@ class SeatMonitor:
             print(f"警告: ROI无效，尺寸: {w}x{h}")
             return False, None
         
+        # 确保背景减除器已初始化
+        if not hasattr(self, 'back_sub') or self.back_sub is None:
+            print("背景减除器未初始化，调用初始化方法...")
+            self.initialize_background_subtractor()
+        
         # 获取配置参数
         min_area = self.config['detection']['motion_threshold']
         static_detection_enabled = self.config['detection'].get('static_detection_enabled', True)
         
         # 计算ROI面积用于静态人体检测
         roi_area = w * h
-        
-        # 静态人体检测的额外参数
-        static_person_min_area_ratio = self.config['detection'].get('static_person_min_area_ratio', 0.01)  # 进一步降低静态检测面积比例
-        min_static_area = max(min_area * 0.01, roi_area * static_person_min_area_ratio * 0.01)  # 超级降低最小面积阈值
-        
-        # 初始化背景减除器（如果尚未初始化）
-        if not hasattr(self, 'back_sub') or self.back_sub is None:
-            print("初始化背景减除器...")
-            try:
-                self.back_sub = cv2.createBackgroundSubtractorMOG2(
-                    history=self.config['detection']['back_sub_history'],
-                    varThreshold=self.config['detection']['back_sub_var_threshold'],
-                    detectShadows=True
-                )
-                # 强制降低学习率，防止静态人员被视为背景
-                self.bg_learning_rate = min(self.config['detection']['bg_learning_rate'], 0.0001)
-                print(f"背景减除器已初始化: 历史帧={self.config['detection']['back_sub_history']}, 方差阈值={self.config['detection']['back_sub_var_threshold']}, 学习率={self.bg_learning_rate}")
-            except Exception as e:
-                print(f"初始化背景减除器失败: {str(e)}")
-                self.back_sub = None
-                motion_contours = []
         
         # 使用背景减除获取前景掩码
         motion_contours = []
@@ -381,49 +365,52 @@ class SeatMonitor:
         print(f"ROI尺寸: {w}x{h}, 最小面积阈值: {min_area * 0.01:.1f}, 静态最小面积阈值: {min_static_area:.1f}, 检测到轮廓数量: {len(all_contours)}")  # 调试信息
         
         # 超级简化的检测模式：几乎任何轮廓都被认为是人体
-        # 1. 如果有任何轮廓，默认认为检测到人
-        if len(all_contours) > 0:
-            person_detected = True
-            print("超级简化模式: 检测到轮廓，默认认为检测到人")
+        # 1. 首先检查前景掩码和静态阈值结果
+        # 进一步降低阈值，提高敏感度到极限
+        fg_area_threshold = w*h*0.0005  # 降至0.05%的ROI面积 - 极低的阈值
+        static_area_threshold = w*h*0.0005
         
-        # 2. 如果前景面积或静态面积超过ROI的极小比例，也认为检测到人
-        # 进一步降低阈值，提高敏感度
-        fg_area_threshold = w*h*0.001  # 降至0.1%的ROI面积
-        static_area_threshold = w*h*0.001
+        # 2. 检查是否有足够的前景或静态区域（主要检测手段）
         if (fg_mask is not None and cv2.countNonZero(fg_mask) > fg_area_threshold) or \
            (static_detection_enabled and static_area > static_area_threshold):
             person_detected = True
-            print(f"超级简化模式: 检测到足够的前景或静态区域（前景>{fg_area_threshold},静态>{static_area_threshold}），认为检测到人")
+            print(f"主要检测: 检测到足够的前景或静态区域（前景>{fg_area_threshold},静态>{static_area_threshold}），认为检测到人")
         
-        # 3. 额外的安全检查：如果没有使用上述简化逻辑检测到人，但有轮廓，则强制认为检测到人
-        if not person_detected and len(all_contours) > 0:
-            print(f"安全检查: 有{len(all_contours)}个轮廓，但之前未检测到人，强制标记为检测到人")
+        # 3. 如果有任何轮廓，也认为检测到人（额外保障）
+        if len(all_contours) > 0:
             person_detected = True
+            print(f"轮廓检测: 检测到{len(all_contours)}个轮廓，认为检测到人")
         
         # 4. 基于色彩的检测补充：检查ROI中是否有明显的肤色区域
         if not person_detected and roi.size > 0:
             # 转换到HSV色彩空间
             hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-            # 定义肤色范围
-            lower_skin = np.array([0, 20, 70], dtype=np.uint8)
-            upper_skin = np.array([20, 255, 255], dtype=np.uint8)
+            # 定义更宽泛的肤色范围
+            lower_skin = np.array([0, 10, 60], dtype=np.uint8)
+            upper_skin = np.array([30, 255, 255], dtype=np.uint8)
             # 创建肤色掩码
             skin_mask = cv2.inRange(hsv, lower_skin, upper_skin)
             skin_area = cv2.countNonZero(skin_mask)
-            # 如果肤色面积超过ROI的0.5%，认为检测到人
-            if skin_area > w*h*0.005:
+            # 如果肤色面积超过ROI的0.2%，认为检测到人
+            if skin_area > w*h*0.002:
                 person_detected = True
-                print(f"肤色检测补充: 检测到肤色区域（面积={skin_area}），强制标记为检测到人")
+                print(f"肤色检测: 检测到肤色区域（面积={skin_area}），认为检测到人")
         
-        # 5. 强制检测模式：如果当前状态是空闲，但上次状态是占用，降低检测门槛
-        if not person_detected and not self.occupancy_status.get(seat_id, {}).get('occupied', False):
-            # 对于空闲状态，更严格的检测
-            pass
+        # 5. 强制检测模式：始终优先检测到人（防止漏报）
+        # 对于这个特定场景，我们更倾向于误报而不是漏报
+        if seat_id in self.occupancy_status and not self.occupancy_status[seat_id]['occupied']:
+            # 空闲状态时，如果有任何可能的人体迹象，就认为检测到人
+            if person_detected:
+                print("强制确认: 空闲状态下检测到人，确认结果")
+            else:
+                # 作为最后的手段，如果以上都没检测到，但ROI中有明显变化，也强制认为检测到人
+                # 这是一个非常宽松的检测条件，用于极端情况
+                if roi_area > 0 and (fg_mask is not None and cv2.countNonZero(fg_mask) > 0) or len(all_contours) > 0:
+                    person_detected = True
+                    print("最终保障: 未通过其他检测方法，但存在变化，强制标记为检测到人")
         else:
-            # 对于已占用状态或过渡状态，放宽检测
-            if len(all_contours) > 0 or (fg_mask is not None and cv2.countNonZero(fg_mask) > 0):
-                person_detected = True
-                print("强制检测模式: 当前状态不为空闲，放宽检测条件，标记为检测到人")
+            # 已占用状态，保持已有的检测结果
+            print("状态保持: 保持当前检测结果")
         
         # 简化版：只检测是否有人，不进行人脸识别
         person_id = "有人" if person_detected else None

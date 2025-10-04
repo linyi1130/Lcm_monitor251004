@@ -8,8 +8,13 @@
     "rotation": 0
   },
   "detection": {
-    "motion_threshold": 10000,
-    "detection_interval": 0.1
+    "motion_threshold": 3000,
+    "detection_interval": 0.1,
+    "back_sub_history": 500,
+    "back_sub_var_threshold": 16,
+    "back_sub_var_threshold_gen": 9,
+    "contour_aspect_ratio_min": 0.2,
+    "contour_aspect_ratio_max": 2.0
   },
   "seats": [
     {

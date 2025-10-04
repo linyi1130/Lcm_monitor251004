@@ -16,8 +16,7 @@ import face_recognition
 import os
 import json
 from pathlib import Path
-import cv2
-import numpy as np
+import math
 from PIL import Image, ImageDraw, ImageFont
 
 class SeatMonitor:
@@ -81,6 +80,9 @@ class SeatMonitor:
         self.last_report_generation = datetime.datetime.now().date()
         self.last_save_time = datetime.datetime.now()
         
+        # 初始化背景减除器，用于改进人员检测
+        self.initialize_background_subtractor()
+        
         print("座位监控系统已初始化")
         
     def load_config(self, config_file):
@@ -140,6 +142,30 @@ class SeatMonitor:
         """简化版：不需要加载已知人脸数据"""
         print("使用简化版检测模式，不加载已知人脸数据")
         pass
+        
+    def initialize_background_subtractor(self):
+        """初始化背景减除器，用于改进人员检测"""
+        try:
+            # 获取配置参数
+            history = self.config['detection'].get('back_sub_history', 500)
+            var_threshold = self.config['detection'].get('back_sub_var_threshold', 16)
+            var_threshold_gen = self.config['detection'].get('back_sub_var_threshold_gen', 9)
+            
+            # 创建背景减除器
+            self.back_sub = cv2.createBackgroundSubtractorMOG2(
+                history=history,
+                varThreshold=var_threshold,
+                detectShadows=True
+            )
+            
+            # 调整背景减除器参数
+            if hasattr(self.back_sub, 'setVarThresholdGen'):
+                self.back_sub.setVarThresholdGen(var_threshold_gen)
+                
+            print("背景减除器初始化成功")
+        except Exception as e:
+            print(f"初始化背景减除器失败: {str(e)}")
+            self.back_sub = None
         
     def initialize_monitor_region(self):
         """Interactive monitor region initialization, user selects four points with mouse"""
@@ -231,7 +257,7 @@ class SeatMonitor:
             print(f"保存配置文件失败: {str(e)}")
     
     def detect_person_in_region(self, frame, region):
-        """检测指定区域内是否有人，优化检测算法"""
+        """检测指定区域内是否有人，优化检测算法以适应背影和遮挡情况"""
         # 提取区域ROI
         x = min([p[0] for p in region])
         y = min([p[1] for p in region])
@@ -239,37 +265,75 @@ class SeatMonitor:
         h = max([p[1] for p in region]) - y
         roi = frame[y:y+h, x:x+w].copy()
         
-        # 转换为灰度图进行轮廓检测
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (7, 7), 0)  # 增大高斯核，减少噪音影响
-        
-        # 自适应阈值，更好地适应光线变化
-        thresh = cv2.adaptiveThreshold(blurred, 255, 
-                                       cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                       cv2.THRESH_BINARY_INV, 11, 2)
-        
-        # 形态学操作，进一步减少噪音
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
-        
-        # 查找轮廓
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # 检查是否启用了背景减除
+        if hasattr(self, 'back_sub') and self.back_sub is not None:
+            # 使用背景减除获取前景掩码
+            fg_mask = self.back_sub.apply(roi)
+            
+            # 去除阴影（通常值为127）
+            _, fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
+            
+            # 形态学操作，填充小洞和消除小物体
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel)
+            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
+            
+            # 查找轮廓
+            contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        else:
+            # 传统方法：转换为灰度图进行轮廓检测
+            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            blurred = cv2.GaussianBlur(gray, (7, 7), 0)  # 增大高斯核，减少噪音影响
+            
+            # 自适应阈值，更好地适应光线变化
+            thresh = cv2.adaptiveThreshold(blurred, 255, 
+                                           cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                           cv2.THRESH_BINARY_INV, 11, 2)
+            
+            # 形态学操作，进一步减少噪音
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+            thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+            
+            # 查找轮廓
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         # 检查是否有足够大的轮廓（可能是人体）
         person_detected = False
         # 设置最小面积阈值，从配置中读取
         min_area = self.config['detection']['motion_threshold']
-        # 设置额外条件：轮廓的宽高比，更接近人体比例
+        
+        # 从配置中读取宽高比范围，适应不同体型和姿态
+        aspect_ratio_min = self.config['detection'].get('contour_aspect_ratio_min', 0.2)
+        aspect_ratio_max = self.config['detection'].get('contour_aspect_ratio_max', 2.0)
+        
+        # 改进的轮廓分析：考虑多个条件
         for contour in contours:
             area = cv2.contourArea(contour)
+            
+            # 1. 面积条件：面积要足够大，但考虑到遮挡，阈值已降低
             if area > min_area:
                 # 计算轮廓的边界框
                 x_rect, y_rect, w_rect, h_rect = cv2.boundingRect(contour)
-                # 计算宽高比
+                
+                # 计算宽高比（考虑到背影可能更宽）
                 aspect_ratio = float(w_rect) / h_rect if h_rect > 0 else 0
-                # 人体通常高度大于宽度，设置合理的比例范围
-                if 0.3 < aspect_ratio < 1.5:  # 人体轮廓的宽高比通常在这个范围内
+                
+                # 计算轮廓的紧凑度（圆形度）
+                perimeter = cv2.arcLength(contour, True)
+                if perimeter > 0:
+                    compactness = 4 * math.pi * area / (perimeter * perimeter)
+                else:
+                    compactness = 0
+                
+                # 综合判断条件：
+                # 1. 宽高比在配置的范围内（适应背影和遮挡情况）
+                # 2. 轮廓位置：通常人会在区域的下半部分（座位上）
+                # 3. 紧凑度：人体轮廓通常不是特别圆
+                if (aspect_ratio_min < aspect_ratio < aspect_ratio_max and 
+                    y_rect + h_rect > h * 0.4 and  # 轮廓底部在区域下半部分
+                    compactness < 0.8):  # 不太圆的形状
+                    
                     person_detected = True
                     break
         
@@ -310,9 +374,9 @@ class SeatMonitor:
                     # 已经记录为有人，增加离开计数器
                     self.leave_counters[seat_id] += 1
                     
-                    # 设置连续检测到离开的帧数阈值（这里设为10，可根据需要调整）
-                    # 这能有效防止因瞬间遮挡或误检测导致的状态频繁变化
-                    if self.leave_counters[seat_id] >= 10:
+                    # 设置连续检测到离开的帧数阈值（这里设为15，适应遮挡情况）
+                    # 更高的阈值可以更好地处理短暂遮挡
+                    if self.leave_counters[seat_id] >= 15:
                         # 确认人离开
                         self.occupancy_status[seat_id]['occupied'] = False
                         self.occupancy_status[seat_id]['exit_time'] = current_time

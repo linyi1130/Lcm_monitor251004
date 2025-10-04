@@ -399,6 +399,7 @@ class SeatMonitor:
                 # 综合判断：满足上半身条件、有头部特征或满足静态人体条件，则认为检测到人
                 if is_upper_body_candidate or has_potential_head or is_static_person_candidate:
                     person_detected = True
+                    print(f"检测到轮廓 - 上半身: {is_upper_body_candidate}, 头部: {has_potential_head}, 静态: {is_static_person_candidate}, 面积: {area:.1f}")  # 调试信息
                     break
         
         # 简化版：只检测是否有人，不进行人脸识别
@@ -441,6 +442,7 @@ class SeatMonitor:
                     # 设置连续检测到离开的帧数阈值（从配置中读取，适应静止和遮挡情况）
                     # 适中的阈值平衡了误报率和响应速度
                     leave_threshold = self.config['detection'].get('leave_detection_threshold', 15)
+                    print(f"座位{seat_id}离开计数: {self.leave_counters[seat_id]}/{leave_threshold}")  # 调试信息
                     if self.leave_counters[seat_id] >= leave_threshold:
                         # 确认人离开
                         self.occupancy_status[seat_id]['occupied'] = False

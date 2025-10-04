@@ -77,7 +77,14 @@ VENV_CONFIG="$VENV_NAME/pyvenv.cfg"
 if [ -f "$VENV_CONFIG" ]; then
     if ! grep -q "include-system-site-packages = true" "$VENV_CONFIG"; then
         echo "配置虚拟环境以允许访问系统Python模块..."
-        sed -i '' 's/include-system-site-packages = false/include-system-site-packages = true/g' "$VENV_CONFIG"
+        # 根据操作系统使用不同的sed语法
+        if [[ "$(uname)" == "Darwin" ]]; then
+            # macOS需要空引号参数
+            sed -i '' 's/include-system-site-packages = false/include-system-site-packages = true/g' "$VENV_CONFIG"
+        else
+            # Linux不需要额外的参数
+            sed -i 's/include-system-site-packages = false/include-system-site-packages = true/g' "$VENV_CONFIG"
+        fi
     fi
 else
     echo "警告：未找到虚拟环境配置文件，可能需要重新创建虚拟环境"

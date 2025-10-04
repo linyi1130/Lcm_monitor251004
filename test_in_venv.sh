@@ -17,7 +17,14 @@ if [ ! -d "$VENV_NAME" ]; then
     echo "配置虚拟环境以允许访问系统Python模块..."
     VENV_CONFIG="$VENV_NAME/pyvenv.cfg"
     if [ -f "$VENV_CONFIG" ]; then
-        sed -i '' 's/include-system-site-packages = false/include-system-site-packages = true/g' "$VENV_CONFIG"
+        # 根据操作系统使用不同的sed语法
+        if [[ "$(uname)" == "Darwin" ]]; then
+            # macOS需要空引号参数
+            sed -i '' 's/include-system-site-packages = false/include-system-site-packages = true/g' "$VENV_CONFIG"
+        else
+            # Linux不需要额外的参数
+            sed -i 's/include-system-site-packages = false/include-system-site-packages = true/g' "$VENV_CONFIG"
+        fi
     else
         echo "include-system-site-packages = true" > "$VENV_CONFIG"
     fi

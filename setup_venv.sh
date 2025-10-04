@@ -113,8 +113,17 @@ python3 -m venv "$VENV_NAME"
 echo "配置虚拟环境以允许访问系统Python模块..."
 # 创建或修改pyvenv.cfg文件，设置include-system-site-packages为true
 VENV_CONFIG="$VENV_NAME/pyvenv.cfg"
+
+# 根据操作系统使用不同的sed语法
 if [ -f "$VENV_CONFIG" ]; then
-    sed -i '' 's/include-system-site-packages = false/include-system-site-packages = true/g' "$VENV_CONFIG"
+    # 检查是否为macOS
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS需要空引号参数
+        sed -i '' 's/include-system-site-packages = false/include-system-site-packages = true/g' "$VENV_CONFIG"
+    else
+        # Linux不需要额外的参数
+        sed -i 's/include-system-site-packages = false/include-system-site-packages = true/g' "$VENV_CONFIG"
+    fi
 else
     echo "include-system-site-packages = true" > "$VENV_CONFIG"
 fi

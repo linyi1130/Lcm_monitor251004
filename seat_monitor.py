@@ -317,7 +317,8 @@ class SeatMonitor:
             static_contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         # 合并运动和静态轮廓检测结果
-        all_contours = list(set(motion_contours + static_contours))
+        # 注意：不使用set去重，因为NumPy数组是不可哈希的
+        all_contours = motion_contours + static_contours
         
         # 检查是否有足够大的轮廓（可能是人体）
         person_detected = False

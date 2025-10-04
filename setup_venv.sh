@@ -59,7 +59,7 @@ install_cmake_rpi() {
     
     # 安装libtiff相关包
     echo "安装libtiff相关包..."
-    sudo apt-get install -y libtiff5 || sudo apt-get install -y libtiff-dev || sudo apt-get install -y libtiff-tools
+    sudo apt-get install -y libtiff-dev || sudo apt-get install -y libtiff-tools || echo "警告：无法安装libtiff包，但这可能不会影响基本功能"
     
     # 安装额外的开发工具
     echo "安装额外的开发工具..."
@@ -98,7 +98,7 @@ else
     echo "sudo rm -rf /usr/local/bin/cmake /usr/local/lib/cmake"
     echo "sudo rm -rf $(python3 -c "import sys; print(sys.prefix)")/bin/cmake || true"
     echo "sudo apt-get install -y cmake build-essential libopenblas-dev liblapack-dev libjpeg-dev zlib1g-dev libcap-dev"
-    echo "sudo apt-get install -y python3-dev git python3-pip libtiff5"
+    echo "sudo apt-get install -y python3-dev git python3-pip libtiff-dev"
     echo "\n# 验证cmake安装"
     echo "cmake --version"
     echo "which cmake"

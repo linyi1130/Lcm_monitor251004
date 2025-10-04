@@ -298,7 +298,8 @@ class SeatMonitor:
                     varThreshold=self.config['detection']['back_sub_var_threshold'],
                     detectShadows=True
                 )
-                self.bg_learning_rate = self.config['detection']['bg_learning_rate']
+                # 强制降低学习率，防止静态人员被视为背景
+                self.bg_learning_rate = min(self.config['detection']['bg_learning_rate'], 0.0001)
                 print(f"背景减除器已初始化: 历史帧={self.config['detection']['back_sub_history']}, 方差阈值={self.config['detection']['back_sub_var_threshold']}, 学习率={self.bg_learning_rate}")
             except Exception as e:
                 print(f"初始化背景减除器失败: {str(e)}")
@@ -386,15 +387,43 @@ class SeatMonitor:
             print("超级简化模式: 检测到轮廓，默认认为检测到人")
         
         # 2. 如果前景面积或静态面积超过ROI的极小比例，也认为检测到人
-        if (fg_mask is not None and cv2.countNonZero(fg_mask) > w*h*0.005) or \
-           (static_detection_enabled and static_area > w*h*0.005):
+        # 进一步降低阈值，提高敏感度
+        fg_area_threshold = w*h*0.001  # 降至0.1%的ROI面积
+        static_area_threshold = w*h*0.001
+        if (fg_mask is not None and cv2.countNonZero(fg_mask) > fg_area_threshold) or \
+           (static_detection_enabled and static_area > static_area_threshold):
             person_detected = True
-            print("超级简化模式: 检测到足够的前景或静态区域，认为检测到人")
+            print(f"超级简化模式: 检测到足够的前景或静态区域（前景>{fg_area_threshold},静态>{static_area_threshold}），认为检测到人")
         
         # 3. 额外的安全检查：如果没有使用上述简化逻辑检测到人，但有轮廓，则强制认为检测到人
         if not person_detected and len(all_contours) > 0:
             print(f"安全检查: 有{len(all_contours)}个轮廓，但之前未检测到人，强制标记为检测到人")
             person_detected = True
+        
+        # 4. 基于色彩的检测补充：检查ROI中是否有明显的肤色区域
+        if not person_detected and roi.size > 0:
+            # 转换到HSV色彩空间
+            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+            # 定义肤色范围
+            lower_skin = np.array([0, 20, 70], dtype=np.uint8)
+            upper_skin = np.array([20, 255, 255], dtype=np.uint8)
+            # 创建肤色掩码
+            skin_mask = cv2.inRange(hsv, lower_skin, upper_skin)
+            skin_area = cv2.countNonZero(skin_mask)
+            # 如果肤色面积超过ROI的0.5%，认为检测到人
+            if skin_area > w*h*0.005:
+                person_detected = True
+                print(f"肤色检测补充: 检测到肤色区域（面积={skin_area}），强制标记为检测到人")
+        
+        # 5. 强制检测模式：如果当前状态是空闲，但上次状态是占用，降低检测门槛
+        if not person_detected and not self.occupancy_status.get(seat_id, {}).get('occupied', False):
+            # 对于空闲状态，更严格的检测
+            pass
+        else:
+            # 对于已占用状态或过渡状态，放宽检测
+            if len(all_contours) > 0 or (fg_mask is not None and cv2.countNonZero(fg_mask) > 0):
+                person_detected = True
+                print("强制检测模式: 当前状态不为空闲，放宽检测条件，标记为检测到人")
         
         # 简化版：只检测是否有人，不进行人脸识别
         person_id = "有人" if person_detected else None

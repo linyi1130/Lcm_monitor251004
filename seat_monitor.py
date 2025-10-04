@@ -362,6 +362,9 @@ class SeatMonitor:
         
         # 检查是否有足够大的轮廓（可能是人体） - 超级简化版本
         person_detected = False
+        # 重新计算静态最小面积阈值用于调试显示
+        static_person_min_area_ratio = self.config['detection'].get('static_person_min_area_ratio', 0.01)
+        min_static_area = max(min_area * 0.01, roi_area * static_person_min_area_ratio * 0.01)
         print(f"ROI尺寸: {w}x{h}, 最小面积阈值: {min_area * 0.01:.1f}, 静态最小面积阈值: {min_static_area:.1f}, 检测到轮廓数量: {len(all_contours)}")  # 调试信息
         
         # 超级简化的检测模式：几乎任何轮廓都被认为是人体

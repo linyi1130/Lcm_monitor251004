@@ -501,11 +501,31 @@ class SeatMonitor:
                     # 已经记录为有人，增加离开计数器
                     self.leave_counters[seat_id] += 1
                     
-                    # 设置连续检测到离开的帧数阈值（从配置中读取，适应静止和遮挡情况）
-                    # 适中的阈值平衡了误报率和响应速度
-                    leave_threshold = self.config['detection'].get('leave_detection_threshold', 15)
+                    # 设置连续检测到离开的帧数阈值，降低阈值以更快识别人员离开
+                    # 优化：从配置中读取，默认设为较低值以提高响应速度
+                    leave_threshold = self.config['detection'].get('leave_detection_threshold', 5)
                     print(f"座位{seat_id}离开计数: {self.leave_counters[seat_id]}/{leave_threshold}")  # 调试信息
-                    if self.leave_counters[seat_id] >= leave_threshold:
+                    
+                    # 增强型检测：如果检测到明显的场景变化（如大面积区域变为背景），提前确认离开
+                    # 直接计算前景区域，无需调用外部方法
+                    fg_area = 0
+                    if hasattr(self, 'back_sub') and self.back_sub is not None:
+                        # 提取感兴趣区域
+                        x = min([p[0] for p in region])
+                        y = min([p[1] for p in region])
+                        w = max([p[0] for p in region]) - x
+                        h = max([p[1] for p in region]) - y
+                        roi = frame[y:y+h, x:x+w].copy()
+                        if roi.size > 0:
+                            # 计算前景区域
+                            fg_mask = self.back_sub.apply(roi, learningRate=0)
+                            _, fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
+                            fg_area = cv2.countNonZero(fg_mask)
+                            print(f"增强型检测 - 前景面积: {fg_area}")
+                    
+                    # 判断条件：达到阈值或前景区域为0且已连续2帧未检测到人
+                    if self.leave_counters[seat_id] >= leave_threshold or (fg_area == 0 and self.leave_counters[seat_id] >= 2):
+                        print("增强型离开检测触发：快速确认人员离开")
                         # 确认人离开
                         self.occupancy_status[seat_id]['occupied'] = False
                         self.occupancy_status[seat_id]['exit_time'] = current_time

@@ -54,14 +54,14 @@ echo "正在安装face_recognition所需的系统依赖..."
 # 检查是否是root用户
 if [ "$(id -u)" = "0" ]; then
     apt-get update
-    apt-get install -y build-essential cmake libopenblas-dev liblapack-dev libjpeg-dev zlib1g-dev
+    apt-get install -y build-essential cmake libopenblas-dev liblapack-dev libjpeg-dev zlib1g-dev libcap-dev
     
     # 尝试安装libtiff相关包（根据不同Linux发行版，包名可能有所不同）
     echo "尝试安装libtiff相关包..."
     apt-get install -y libtiff5 || apt-get install -y libtiff-dev || apt-get install -y libtiff-tools
 else
     echo "警告：需要root权限安装系统依赖，建议运行以下命令："
-    echo "sudo apt-get update && sudo apt-get install -y build-essential cmake libopenblas-dev liblapack-dev libjpeg-dev zlib1g-dev"
+    echo "sudo apt-get update && sudo apt-get install -y build-essential cmake libopenblas-dev liblapack-dev libjpeg-dev zlib1g-dev libcap-dev"
     echo "然后尝试安装libtiff相关包："
     echo "sudo apt-get install -y libtiff5 || sudo apt-get install -y libtiff-dev || sudo apt-get install -y libtiff-tools"
 fi

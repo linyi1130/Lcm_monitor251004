@@ -33,7 +33,7 @@
 
 2. **安装必要的系统依赖**
    ```bash
-   sudo apt install python3-pip python3-opencv libopenjp2-7 -y
+   sudo apt install python3-pip python3-opencv libopenjp2-7 libcap-dev -y
    
    # 尝试安装libtiff相关包（根据不同Linux发行版，包名可能有所不同）
    sudo apt install libtiff5 -y || sudo apt install libtiff-dev -y || sudo apt install libtiff-tools -y
@@ -49,9 +49,15 @@
 
 4. **使用虚拟环境安装Python依赖（推荐）**
    ```bash
-   # 运行虚拟环境设置脚本
+   # 运行虚拟环境设置脚本（方法1：使用bash显式运行）
    bash setup_venv.sh
+   
+   # 或者（方法2：添加执行权限后直接运行）
+   chmod +x setup_venv.sh
+   ./setup_venv.sh
    ```
+   
+   *注意：如果遇到 "setup_venv.sh: command not found" 错误，请使用上述任意一种方法运行脚本。*
 
    或者手动设置虚拟环境：
    ```bash
@@ -100,12 +106,19 @@
    使用虚拟环境运行（推荐）：
    ```bash
    # 使用启动脚本（会自动处理虚拟环境）
+   # 方法1：使用bash显式运行
    bash start_monitor.sh
+   
+   # 或者（方法2：添加执行权限后直接运行）
+   chmod +x start_monitor.sh
+   ./start_monitor.sh
    
    # 或者手动激活虚拟环境并运行
    source seat_monitor_venv/bin/activate
    python main.py
    ```
+   
+   *注意：如果遇到 "start_monitor.sh: command not found" 错误，请使用上述任意一种方法运行脚本。*
    
    不使用虚拟环境的运行方式（不推荐）：
    ```bash
@@ -121,6 +134,19 @@
    - 将人脸照片保存到`known_faces`目录
    - 照片文件名（不含扩展名）将作为人员识别的名称
    - 支持JPG和PNG格式
+
+4. **运行系统测试**
+   在没有实际摄像头的环境下，可以使用测试脚本来验证系统功能：
+   ```bash
+   # 方法1：使用bash显式运行测试脚本
+   bash test_in_venv.sh
+   
+   # 或者（方法2：添加执行权限后直接运行）
+   chmod +x test_in_venv.sh
+   ./test_in_venv.sh
+   ```
+   
+   *注意：如果遇到 "test_in_venv.sh: command not found" 错误，请使用上述任意一种方法运行脚本。*
 
 ## 目录结构
 
@@ -183,6 +209,7 @@ lcm_monitor/
 - 长时间运行可能会产生大量数据，请确保有足够的存储空间
 - 如需开机自启，可以将启动命令添加到`/etc/rc.local`文件中
 - 使用虚拟环境可以更好地隔离项目依赖，避免与系统Python环境冲突
+- 如果遇到脚本运行权限问题，请参考[HELP_RUNNING_SCRIPTS.md](HELP_RUNNING_SCRIPTS.md)文件获取详细解决方案
 
 ## 版权信息
 

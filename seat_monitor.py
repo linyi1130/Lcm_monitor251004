@@ -144,12 +144,12 @@ class SeatMonitor:
         pass
         
     def initialize_background_subtractor(self):
-        """初始化背景减除器，优化参数以适应静止人体检测"""
+        """初始化背景减除器，平衡静态和动态人体检测"""
         try:
-            # 获取配置参数 - 优化静止人体检测的默认值
-            history = self.config['detection'].get('back_sub_history', 1000)  # 增加历史记录，减慢背景更新速度
-            var_threshold = self.config['detection'].get('back_sub_var_threshold', 20)  # 增加阈值，减少背景更新灵敏度
-            var_threshold_gen = self.config['detection'].get('back_sub_var_threshold_gen', 16)
+            # 获取配置参数 - 优化整体检测灵敏度
+            history = self.config['detection'].get('back_sub_history', 300)  # 适中的历史记录
+            var_threshold = self.config['detection'].get('back_sub_var_threshold', 10)  # 降低阈值，提高敏感度
+            var_threshold_gen = self.config['detection'].get('back_sub_var_threshold_gen', 9)
             
             # 创建背景减除器
             self.back_sub = cv2.createBackgroundSubtractorMOG2(
@@ -164,12 +164,12 @@ class SeatMonitor:
             
             # 设置阴影阈值，改善阴影处理
             if hasattr(self.back_sub, 'setShadowThreshold'):
-                self.back_sub.setShadowThreshold(0.5)  # 调整阴影阈值，减少对阴影的误判
+                self.back_sub.setShadowThreshold(0.7)  # 增加阴影阈值，更好地识别阴影中的人体
             
             # 配置学习率，控制背景模型更新速度
-            self.bg_learning_rate = self.config['detection'].get('bg_learning_rate', 0.001)  # 低学习率，减慢背景更新
+            self.bg_learning_rate = self.config['detection'].get('bg_learning_rate', 0.01)  # 适中学习率，平衡更新速度
             
-            print("背景减除器初始化成功（已优化静止人体检测）")
+            print("背景减除器初始化成功（已优化人体检测灵敏度）")
         except Exception as e:
             print(f"初始化背景减除器失败: {str(e)}")
             self.back_sub = None
@@ -300,15 +300,15 @@ class SeatMonitor:
         if static_detection_enabled:
             # 转换为灰度图进行静态轮廓检测
             gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-            blurred = cv2.GaussianBlur(gray, (7, 7), 0)
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)  # 减小高斯核，保留更多细节
             
             # 自适应阈值，更好地适应光线变化
             thresh = cv2.adaptiveThreshold(blurred, 255, 
                                            cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                           cv2.THRESH_BINARY_INV, 15, 3)
+                                           cv2.THRESH_BINARY_INV, 11, 2)  # 调整块大小和常数，提高敏感度
             
             # 形态学操作，进一步减少噪音
-            kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+            kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))  # 减小闭合核，保留更多小细节
             kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
             thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel_close)
             thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel_open)
@@ -317,8 +317,11 @@ class SeatMonitor:
             static_contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         # 合并运动和静态轮廓检测结果
-        # 注意：不使用set去重，因为NumPy数组是不可哈希的
-        all_contours = motion_contours + static_contours
+        all_contours = []
+        if motion_contours and len(motion_contours) > 0:
+            all_contours.extend(motion_contours)
+        if static_contours and len(static_contours) > 0:
+            all_contours.extend(static_contours)
         
         # 检查是否有足够大的轮廓（可能是人体）
         person_detected = False
@@ -342,8 +345,8 @@ class SeatMonitor:
         for contour in all_contours:
             area = cv2.contourArea(contour)
             
-            # 面积条件：面积要足够大，考虑运动和静态情况
-            if area > min_area or (static_detection_enabled and area > min_static_area):
+            # 面积条件：面积要足够大，考虑运动和静态情况，降低阈值提高敏感度
+            if area > min_area * 0.7 or (static_detection_enabled and area > min_static_area * 0.7):
                 # 计算轮廓的边界框
                 x_rect, y_rect, w_rect, h_rect = cv2.boundingRect(contour)
                 
@@ -360,33 +363,37 @@ class SeatMonitor:
                 # 计算轮廓的中心位置
                 contour_center_y = y_rect + h_rect / 2
                 
-                # 上半身检测条件
+                # 上半身检测条件 - 放宽条件提高检测率
                 is_upper_body_candidate = False
                 
                 # 条件1: 宽高比在范围内（适应上半身和不同姿态）
                 # 条件2: 高度占ROI的一定比例（上半身通常至少占ROI高度的1/3）
                 # 条件3: 轮廓中心位置考虑（上半身可能在ROI的中上部）
                 # 条件4: 紧凑度（上半身通常不是特别圆）
-                if (aspect_ratio_min < aspect_ratio < aspect_ratio_max and 
-                    h_rect > h * upper_body_min_height_ratio and 
-                    abs(contour_center_y - h/2) < h * upper_body_center_offset and 
-                    compactness < 0.8):
+                if ((aspect_ratio_min * 0.8 < aspect_ratio < aspect_ratio_max * 1.2) and 
+                    h_rect > h * upper_body_min_height_ratio * 0.8 and 
+                    (abs(contour_center_y - h/2) < h * upper_body_center_offset or 
+                     # 额外条件：如果轮廓在ROI的上半部分，也可能是上半身
+                     (y_rect + h_rect/2 < h * 0.6)) and 
+                    compactness < 0.9):  # 放宽紧凑度要求
                     is_upper_body_candidate = True
                 
                 # 额外的头部检测启发式方法：寻找ROI顶部的小而圆的轮廓（可能是头部）
                 has_potential_head = False
-                if h_rect > h * 0.4 and y_rect < h * 0.3:  # 上半身位于ROI上半部分
+                # 放宽头部检测条件
+                if h_rect > h * 0.2 and y_rect < h * 0.4:  # 头部可能在ROI的更大部分
                     # 检查轮廓是否有类似头部的特征
-                    if w_rect > h_rect * 0.6 and w_rect < h_rect * 1.2:  # 宽度和高度较为接近（头部特征）
+                    if w_rect > h_rect * 0.5 and w_rect < h_rect * 1.5:  # 更宽松的宽高比范围
                         has_potential_head = True
                 
-                # 针对静态人体的检测条件
+                # 针对静态人体的检测条件 - 进一步放宽
                 is_static_person_candidate = False
-                if static_detection_enabled and area > min_static_area:
+                if static_detection_enabled and area > min_static_area * 0.5:  # 大幅降低面积要求
                     # 静态人体通常有一定的宽高比和面积特征
-                    if (aspect_ratio_min * 0.8 < aspect_ratio < aspect_ratio_max * 1.2 and  # 放宽范围
-                        h_rect > h * 0.25 and  # 更低的高度要求
-                        w_rect > w * 0.2):  # 足够的宽度
+                    if (aspect_ratio_min * 0.5 < aspect_ratio < aspect_ratio_max * 2.0 and  # 更宽松的范围
+                        h_rect > h * 0.2 and  # 更低的高度要求
+                        (w_rect > w * 0.15 or  # 更宽松的宽度要求
+                         area > w * h * 0.03)):  # 或者足够的面积比例
                         is_static_person_candidate = True
                 
                 # 综合判断：满足上半身条件、有头部特征或满足静态人体条件，则认为检测到人
@@ -432,8 +439,8 @@ class SeatMonitor:
                     self.leave_counters[seat_id] += 1
                     
                     # 设置连续检测到离开的帧数阈值（从配置中读取，适应静止和遮挡情况）
-                    # 更高的阈值可以更好地处理静止不动和短暂遮挡
-                    leave_threshold = self.config['detection'].get('leave_detection_threshold', 30)
+                    # 适中的阈值平衡了误报率和响应速度
+                    leave_threshold = self.config['detection'].get('leave_detection_threshold', 15)
                     if self.leave_counters[seat_id] >= leave_threshold:
                         # 确认人离开
                         self.occupancy_status[seat_id]['occupied'] = False

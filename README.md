@@ -42,7 +42,28 @@
    cd lcm_monitor
    ```
 
-4. **安装Python依赖**
+4. **使用虚拟环境安装Python依赖（推荐）**
+   ```bash
+   # 运行虚拟环境设置脚本
+   bash setup_venv.sh
+   ```
+
+   或者手动设置虚拟环境：
+   ```bash
+   # 创建虚拟环境
+   python3 -m venv seat_monitor_venv
+   
+   # 激活虚拟环境
+   source seat_monitor_venv/bin/activate
+   
+   # 更新pip
+   pip install --upgrade pip
+   
+   # 安装项目依赖
+   pip install -r requirements.txt
+   ```
+
+   不使用虚拟环境的安装方式（不推荐）：
    ```bash
    pip3 install -r requirements.txt
    ```
@@ -70,8 +91,20 @@
 ## 使用方法
 
 1. **启动系统**
+   
+   使用虚拟环境运行（推荐）：
    ```bash
-   python3 seat_monitor.py
+   # 使用启动脚本（会自动处理虚拟环境）
+   bash start_monitor.sh
+   
+   # 或者手动激活虚拟环境并运行
+   source seat_monitor_venv/bin/activate
+   python main.py
+   ```
+   
+   不使用虚拟环境的运行方式（不推荐）：
+   ```bash
+   python3 main.py
    ```
 
 2. **操作说明**
@@ -88,13 +121,18 @@
 
 ```
 lcm_monitor/
-├── seat_monitor.py    # 主程序文件
-├── config.json        # 配置文件
-├── requirements.txt   # Python依赖列表
-├── README.md          # 项目说明文档
-├── data/              # 存储原始记录数据
-├── reports/           # 存储生成的报告
-└── known_faces/       # 存储已知人脸图像（用于识别）
+├── seat_monitor.py      # 主程序文件
+├── main.py              # 程序入口点
+├── config.json          # 配置文件
+├── requirements.txt     # Python依赖列表
+├── README.md            # 项目说明文档
+├── setup_venv.sh        # 虚拟环境设置脚本
+├── start_monitor.sh     # 系统启动脚本
+├── test_system.py       # 测试脚本
+├── test_in_venv.sh      # 虚拟环境中运行测试的脚本
+├── data/                # 存储原始记录数据
+├── reports/             # 存储生成的报告
+└── known_faces/         # 存储已知人脸图像（用于识别）
 ```
 
 ## 数据记录格式
@@ -139,6 +177,7 @@ lcm_monitor/
 - 建议定期备份`data`和`reports`目录中的数据
 - 长时间运行可能会产生大量数据，请确保有足够的存储空间
 - 如需开机自启，可以将启动命令添加到`/etc/rc.local`文件中
+- 使用虚拟环境可以更好地隔离项目依赖，避免与系统Python环境冲突
 
 ## 版权信息
 

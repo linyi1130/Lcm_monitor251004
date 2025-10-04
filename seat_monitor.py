@@ -144,11 +144,11 @@ class SeatMonitor:
         pass
         
     def initialize_background_subtractor(self):
-        """初始化背景减除器，用于改进人员检测"""
+        """初始化背景减除器，特别优化参数以适应上半身检测"""
         try:
-            # 获取配置参数
-            history = self.config['detection'].get('back_sub_history', 500)
-            var_threshold = self.config['detection'].get('back_sub_var_threshold', 16)
+            # 获取配置参数 - 优化上半身检测的默认值
+            history = self.config['detection'].get('back_sub_history', 300)  # 减少历史记录，更快适应场景变化
+            var_threshold = self.config['detection'].get('back_sub_var_threshold', 10)  # 降低阈值，提高敏感度
             var_threshold_gen = self.config['detection'].get('back_sub_var_threshold_gen', 9)
             
             # 创建背景减除器
@@ -161,8 +161,12 @@ class SeatMonitor:
             # 调整背景减除器参数
             if hasattr(self.back_sub, 'setVarThresholdGen'):
                 self.back_sub.setVarThresholdGen(var_threshold_gen)
+            
+            # 设置阴影阈值，改善阴影处理
+            if hasattr(self.back_sub, 'setShadowThreshold'):
+                self.back_sub.setShadowThreshold(0.7)  # 调整阴影阈值，减少对阴影的误判
                 
-            print("背景减除器初始化成功")
+            print("背景减除器初始化成功（已优化上半身检测）")
         except Exception as e:
             print(f"初始化背景减除器失败: {str(e)}")
             self.back_sub = None
@@ -257,7 +261,7 @@ class SeatMonitor:
             print(f"保存配置文件失败: {str(e)}")
     
     def detect_person_in_region(self, frame, region):
-        """检测指定区域内是否有人，优化检测算法以适应背影和遮挡情况"""
+        """检测指定区域内是否有人，优化检测算法以适应背影、遮挡和上半身为主的情况"""
         # 提取区域ROI
         x = min([p[0] for p in region])
         y = min([p[1] for p in region])
@@ -273,10 +277,11 @@ class SeatMonitor:
             # 去除阴影（通常值为127）
             _, fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
             
-            # 形态学操作，填充小洞和消除小物体
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel)
-            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
+            # 形态学操作，填充小洞和消除小物体 - 优化上半身检测的核大小
+            kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))  # 更大的核用于上半身
+            kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))   # 更小的核避免移除小细节
+            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel_close)
+            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel_open)
             
             # 查找轮廓
             contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -285,15 +290,16 @@ class SeatMonitor:
             gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
             blurred = cv2.GaussianBlur(gray, (7, 7), 0)  # 增大高斯核，减少噪音影响
             
-            # 自适应阈值，更好地适应光线变化
+            # 自适应阈值，更好地适应光线变化 - 调整参数以更好地捕捉上半身
             thresh = cv2.adaptiveThreshold(blurred, 255, 
                                            cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                           cv2.THRESH_BINARY_INV, 11, 2)
+                                           cv2.THRESH_BINARY_INV, 15, 3)  # 调整块大小和常数
             
-            # 形态学操作，进一步减少噪音
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-            thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+            # 形态学操作，进一步减少噪音 - 优化上半身检测的核大小
+            kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+            kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel_close)
+            thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel_open)
             
             # 查找轮廓
             contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -307,16 +313,20 @@ class SeatMonitor:
         aspect_ratio_min = self.config['detection'].get('contour_aspect_ratio_min', 0.2)
         aspect_ratio_max = self.config['detection'].get('contour_aspect_ratio_max', 2.0)
         
-        # 改进的轮廓分析：考虑多个条件
+        # 针对上半身的特殊配置
+        upper_body_min_height_ratio = self.config['detection'].get('upper_body_min_height_ratio', 0.3)  # 上半身最小高度比例
+        upper_body_center_offset = self.config['detection'].get('upper_body_center_offset', 0.2)  # 上半身中心偏移比例
+        
+        # 改进的轮廓分析：考虑多个条件，特别优化上半身检测
         for contour in contours:
             area = cv2.contourArea(contour)
             
-            # 1. 面积条件：面积要足够大，但考虑到遮挡，阈值已降低
+            # 1. 面积条件：面积要足够大，但考虑到遮挡和上半身，阈值已降低
             if area > min_area:
                 # 计算轮廓的边界框
                 x_rect, y_rect, w_rect, h_rect = cv2.boundingRect(contour)
                 
-                # 计算宽高比（考虑到背影可能更宽）
+                # 计算宽高比（上半身通常更宽更矮）
                 aspect_ratio = float(w_rect) / h_rect if h_rect > 0 else 0
                 
                 # 计算轮廓的紧凑度（圆形度）
@@ -326,14 +336,31 @@ class SeatMonitor:
                 else:
                     compactness = 0
                 
-                # 综合判断条件：
-                # 1. 宽高比在配置的范围内（适应背影和遮挡情况）
-                # 2. 轮廓位置：通常人会在区域的下半部分（座位上）
-                # 3. 紧凑度：人体轮廓通常不是特别圆
+                # 计算轮廓的中心位置
+                contour_center_y = y_rect + h_rect / 2
+                
+                # 上半身检测条件
+                is_upper_body_candidate = False
+                
+                # 条件1: 宽高比在范围内（适应上半身和不同姿态）
+                # 条件2: 高度占ROI的一定比例（上半身通常至少占ROI高度的1/3）
+                # 条件3: 轮廓中心位置考虑（上半身可能在ROI的中上部）
+                # 条件4: 紧凑度（上半身通常不是特别圆）
                 if (aspect_ratio_min < aspect_ratio < aspect_ratio_max and 
-                    y_rect + h_rect > h * 0.4 and  # 轮廓底部在区域下半部分
-                    compactness < 0.8):  # 不太圆的形状
-                    
+                    h_rect > h * upper_body_min_height_ratio and 
+                    abs(contour_center_y - h/2) < h * upper_body_center_offset and 
+                    compactness < 0.8):
+                    is_upper_body_candidate = True
+                
+                # 额外的头部检测启发式方法：寻找ROI顶部的小而圆的轮廓（可能是头部）
+                has_potential_head = False
+                if h_rect > h * 0.4 and y_rect < h * 0.3:  # 上半身位于ROI上半部分
+                    # 检查轮廓是否有类似头部的特征
+                    if w_rect > h_rect * 0.6 and w_rect < h_rect * 1.2:  # 宽度和高度较为接近（头部特征）
+                        has_potential_head = True
+                
+                # 综合判断：满足上半身条件或有头部特征，则认为检测到人
+                if is_upper_body_candidate or has_potential_head:
                     person_detected = True
                     break
         

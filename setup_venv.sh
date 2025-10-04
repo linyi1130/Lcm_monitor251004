@@ -105,9 +105,19 @@ else
     echo "\n# 重要提示：安装完成后请重新运行此脚本"
 fi
 
-# 创建虚拟环境
+# 创建虚拟环境 - 并允许访问系统Python模块
 echo "正在创建虚拟环境 '$VENV_NAME'..."
 python3 -m venv "$VENV_NAME"
+
+# 允许虚拟环境访问系统Python模块
+echo "配置虚拟环境以允许访问系统Python模块..."
+# 创建或修改pyvenv.cfg文件，设置include-system-site-packages为true
+VENV_CONFIG="$VENV_NAME/pyvenv.cfg"
+if [ -f "$VENV_CONFIG" ]; then
+    sed -i '' 's/include-system-site-packages = false/include-system-site-packages = true/g' "$VENV_CONFIG"
+else
+    echo "include-system-site-packages = true" > "$VENV_CONFIG"
+fi
 
 # 激活虚拟环境
 source "$VENV_NAME/bin/activate"

@@ -20,6 +20,15 @@ if [ ! -d "$VENV_NAME" ]; then
     echo "虚拟环境 '$VENV_NAME' 不存在，正在创建..."
     python3 -m venv "$VENV_NAME"
     
+    # 允许虚拟环境访问系统Python模块
+    echo "配置虚拟环境以允许访问系统Python模块..."
+    VENV_CONFIG="$VENV_NAME/pyvenv.cfg"
+    if [ -f "$VENV_CONFIG" ]; then
+        sed -i '' 's/include-system-site-packages = false/include-system-site-packages = true/g' "$VENV_CONFIG"
+    else
+        echo "include-system-site-packages = true" > "$VENV_CONFIG"
+    fi
+    
     # 激活虚拟环境
 source "$VENV_NAME/bin/activate"
     
@@ -59,6 +68,19 @@ if [ -f "requirements.txt" ]; then
         echo "错误：未找到requirements.txt文件"
         exit 1
     fi
+fi
+
+# 激活虚拟环境前先检查配置
+echo "检查虚拟环境配置..."
+# 确保虚拟环境允许访问系统Python模块
+VENV_CONFIG="$VENV_NAME/pyvenv.cfg"
+if [ -f "$VENV_CONFIG" ]; then
+    if ! grep -q "include-system-site-packages = true" "$VENV_CONFIG"; then
+        echo "配置虚拟环境以允许访问系统Python模块..."
+        sed -i '' 's/include-system-site-packages = false/include-system-site-packages = true/g' "$VENV_CONFIG"
+    fi
+else
+    echo "警告：未找到虚拟环境配置文件，可能需要重新创建虚拟环境"
 fi
 
 # 激活虚拟环境

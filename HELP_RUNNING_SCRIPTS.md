@@ -237,13 +237,32 @@ sudo apt-get install -y python3-libcamera python3-kms++ libcamera-apps libcamera
    ```
 
 3. **问题：** 在虚拟环境中无法使用libcamera
-   **解决方案：** libcamera通常是系统级Python包，可能需要在虚拟环境中创建符号链接：
+   **解决方案：** libcamera通常是系统级Python包，虚拟环境默认不会包含系统Python模块路径。有两种方法解决此问题：
+   
+   **方法一：配置虚拟环境以访问系统模块**
+   ```bash
+   # 检查虚拟环境配置
+   cat seat_monitor_venv/pyvenv.cfg
+   
+   # 确保配置中包含以下行
+   # include-system-site-packages = true
+   
+   # 如果需要手动修改配置
+   # 对于MacOS：
+   sed -i '' 's/include-system-site-packages = false/include-system-site-packages = true/g' seat_monitor_venv/pyvenv.cfg
+   # 对于Linux：
+   sed -i 's/include-system-site-packages = false/include-system-site-packages = true/g' seat_monitor_venv/pyvenv.cfg
+   ```
+   
+   **方法二：在虚拟环境中创建符号链接**
    ```bash
    # 找到系统Python的libcamera包位置
    find /usr/lib/python3* -name "libcamera"
    # 在虚拟环境中创建符号链接
    ln -s /usr/lib/python3.11/dist-packages/libcamera /path/to/your/venv/lib/python3.11/site-packages/
    ```
+   
+   注意：我们的安装脚本（setup_venv.sh）和启动脚本（start_monitor.sh）已经自动配置了虚拟环境以允许访问系统模块，但如果您仍然遇到问题，可以尝试上述方法。
 
 ## 快速开始
 

@@ -114,6 +114,25 @@
    pip3 install -r requirements.txt
    ```
 
+   **虚拟环境配置说明：**
+   
+   注意：libcamera是一个系统级Python模块，默认情况下虚拟环境可能无法访问系统安装的模块。我们的安装脚本已经自动配置了虚拟环境以允许访问系统模块，但如果您遇到导入libcamera模块的问题，可以检查虚拟环境配置文件：
+
+   ```bash
+   # 检查虚拟环境配置
+   cat seat_monitor_venv/pyvenv.cfg
+
+   # 确保配置中包含以下行
+   # include-system-site-packages = true
+   ```
+
+   如果需要手动修复配置：
+
+   ```bash
+   # 编辑虚拟环境配置文件
+   sed -i 's/include-system-site-packages = false/include-system-site-packages = true/g' seat_monitor_venv/pyvenv.cfg
+   ```
+
 5. **启用Camera Module 3**
    - 通过Raspberry Pi配置工具启用摄像头：
    ```bash

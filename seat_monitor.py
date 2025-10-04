@@ -56,6 +56,8 @@ class SeatMonitor:
         
         # 人员状态跟踪
         self.occupancy_status = {}
+        # 状态滤波计数器，用于记录连续检测到的离开帧数量
+        self.leave_counters = {}
         self.initialize_occupancy_status()
         
         # 数据存储
@@ -131,6 +133,8 @@ class SeatMonitor:
                 'person_id': None,
                 'face_encoding': None
             }
+            # 初始化离开计数器
+            self.leave_counters[seat['id']] = 0
     
     def load_known_faces(self):
         """简化版：不需要加载已知人脸数据"""
@@ -227,7 +231,7 @@ class SeatMonitor:
             print(f"保存配置文件失败: {str(e)}")
     
     def detect_person_in_region(self, frame, region):
-        """检测指定区域内是否有人"""
+        """检测指定区域内是否有人，优化检测算法"""
         # 提取区域ROI
         x = min([p[0] for p in region])
         y = min([p[1] for p in region])
@@ -237,18 +241,37 @@ class SeatMonitor:
         
         # 转换为灰度图进行轮廓检测
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        _, thresh = cv2.threshold(blurred, 70, 255, cv2.THRESH_BINARY_INV)
+        blurred = cv2.GaussianBlur(gray, (7, 7), 0)  # 增大高斯核，减少噪音影响
+        
+        # 自适应阈值，更好地适应光线变化
+        thresh = cv2.adaptiveThreshold(blurred, 255, 
+                                       cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                       cv2.THRESH_BINARY_INV, 11, 2)
+        
+        # 形态学操作，进一步减少噪音
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
         
         # 查找轮廓
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         # 检查是否有足够大的轮廓（可能是人体）
         person_detected = False
+        # 设置最小面积阈值，从配置中读取
+        min_area = self.config['detection']['motion_threshold']
+        # 设置额外条件：轮廓的宽高比，更接近人体比例
         for contour in contours:
-            if cv2.contourArea(contour) > self.config['detection']['motion_threshold']:
-                person_detected = True
-                break
+            area = cv2.contourArea(contour)
+            if area > min_area:
+                # 计算轮廓的边界框
+                x_rect, y_rect, w_rect, h_rect = cv2.boundingRect(contour)
+                # 计算宽高比
+                aspect_ratio = float(w_rect) / h_rect if h_rect > 0 else 0
+                # 人体通常高度大于宽度，设置合理的比例范围
+                if 0.3 < aspect_ratio < 1.5:  # 人体轮廓的宽高比通常在这个范围内
+                    person_detected = True
+                    break
         
         # 简化版：只检测是否有人，不进行人脸识别
         person_id = "有人" if person_detected else None
@@ -256,7 +279,7 @@ class SeatMonitor:
         return person_detected, person_id
     
     def update_occupancy_status(self):
-        """更新座位占用状态"""
+        """更新座位占用状态，添加状态滤波逻辑"""
         current_time = datetime.datetime.now()
         
         # 捕获图像
@@ -270,33 +293,47 @@ class SeatMonitor:
             # 检测区域内是否有人
             person_detected, person_id = self.detect_person_in_region(frame, region)
             
-            # 更新占用状态
-            if person_detected and not self.occupancy_status[seat_id]['occupied']:
-                # 有人坐下
-                self.occupancy_status[seat_id]['occupied'] = True
-                self.occupancy_status[seat_id]['entry_time'] = current_time
-                self.occupancy_status[seat_id]['person_id'] = person_id
-                print(f"[{current_time}] {seat['name']}被{person_id if person_id else '某人'}占用")
-            elif not person_detected and self.occupancy_status[seat_id]['occupied']:
-                # 人离开
-                self.occupancy_status[seat_id]['occupied'] = False
-                self.occupancy_status[seat_id]['exit_time'] = current_time
-                duration = (current_time - self.occupancy_status[seat_id]['entry_time']).total_seconds()
-                self.occupancy_status[seat_id]['duration'] = duration
+            # 更新占用状态，添加滤波逻辑
+            if person_detected:
+                # 检测到有人，重置离开计数器
+                self.leave_counters[seat_id] = 0
                 
-                # 记录本次占用信息
-                record = {
-                    'seat_id': seat_id,
-                    'seat_name': seat['name'],
-                    'entry_time': self.occupancy_status[seat_id]['entry_time'],
-                    'exit_time': current_time,
-                    'duration_seconds': duration,
-                    'person_id': self.occupancy_status[seat_id]['person_id']
-                }
-                self.records.append(record)
-                self.save_record(record)
-                
-                print(f"[{current_time}] {seat['name']}被释放，占用时长: {duration/60:.2f}分钟")
+                if not self.occupancy_status[seat_id]['occupied']:
+                    # 有人坐下
+                    self.occupancy_status[seat_id]['occupied'] = True
+                    self.occupancy_status[seat_id]['entry_time'] = current_time
+                    self.occupancy_status[seat_id]['person_id'] = person_id
+                    print(f"[{current_time}] {seat['name']}被{person_id if person_id else '某人'}占用")
+            else:
+                # 没有检测到人
+                if self.occupancy_status[seat_id]['occupied']:
+                    # 已经记录为有人，增加离开计数器
+                    self.leave_counters[seat_id] += 1
+                    
+                    # 设置连续检测到离开的帧数阈值（这里设为10，可根据需要调整）
+                    # 这能有效防止因瞬间遮挡或误检测导致的状态频繁变化
+                    if self.leave_counters[seat_id] >= 10:
+                        # 确认人离开
+                        self.occupancy_status[seat_id]['occupied'] = False
+                        self.occupancy_status[seat_id]['exit_time'] = current_time
+                        duration = (current_time - self.occupancy_status[seat_id]['entry_time']).total_seconds()
+                        self.occupancy_status[seat_id]['duration'] = duration
+                        
+                        # 记录本次占用信息
+                        record = {
+                            'seat_id': seat_id,
+                            'seat_name': seat['name'],
+                            'entry_time': self.occupancy_status[seat_id]['entry_time'],
+                            'exit_time': current_time,
+                            'duration_seconds': duration,
+                            'person_id': self.occupancy_status[seat_id]['person_id']
+                        }
+                        self.records.append(record)
+                        self.save_record(record)
+                        
+                        print(f"[{current_time}] {seat['name']}被释放，占用时长: {duration/60:.2f}分钟")
+                        # 重置计数器
+                        self.leave_counters[seat_id] = 0
         
         # 检查是否需要定期保存数据（即使当前没有人离开）
         if (current_time - self.last_save_time).total_seconds() > self.save_interval:
@@ -429,6 +466,9 @@ class SeatMonitor:
             cv2.resizeWindow(window_name, self.config['camera']['resolution']['width'], 
                              self.config['camera']['resolution']['height'])
             
+            # 初始化帧时间戳，用于动态调整检测频率
+            last_frame_time = datetime.datetime.now()
+            
             while self.running:
                 try:
                     # 更新占用状态并获取当前帧
@@ -450,8 +490,12 @@ class SeatMonitor:
                     if cv2.waitKey(1) & 0xFF == ord('q'):
                         self.running = False
                         
-                    # 根据配置文件中的检测间隔调整帧率
-                    time.sleep(self.detection_interval)
+                    # 动态调整延迟时间，确保检测频率稳定
+                    current_time = datetime.datetime.now()
+                    elapsed_time = (current_time - last_frame_time).total_seconds()
+                    sleep_time = max(0, self.detection_interval - elapsed_time)
+                    time.sleep(sleep_time)
+                    last_frame_time = current_time
                 except Exception as e:
                     print(f"处理帧时出错: {str(e)}")
                     time.sleep(0.5)  # 出错时稍作暂停再继续

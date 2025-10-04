@@ -33,8 +33,13 @@
 
 2. **安装必要的系统依赖**
    ```bash
-   sudo apt install python3-pip python3-opencv libopenjp2-7 libtiff5 -y
+   sudo apt install python3-pip python3-opencv libopenjp2-7 -y
+   
+   # 尝试安装libtiff相关包（根据不同Linux发行版，包名可能有所不同）
+   sudo apt install libtiff5 -y || sudo apt install libtiff-dev -y || sudo apt install libtiff-tools -y
    ```
+   
+   *注意：如果上述命令执行失败，可能是因为您的Linux发行版中包名称不同。请根据您的系统实际情况安装相应的libtiff包。*
 
 3. **克隆项目代码**
    ```bash

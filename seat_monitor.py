@@ -37,12 +37,37 @@ class SeatMonitor:
         
         # 设置座位区域
         self.seat_regions = []
-        for seat_config in self.config['seats']:
-            # 转换区域坐标格式
-            region = [(p[0], p[1]) for p in seat_config['region']]
+        # 初始化交互式区域选择
+        if len(self.config.get('seats', [])) > 0:
+            use_existing_region = input("是否使用现有监控区域？(y/n): ").strip().lower() == 'y'
+            if use_existing_region:
+                # 使用配置文件中的区域
+                seat_config = self.config['seats'][0]
+                region = [(p[0], p[1]) for p in seat_config['region']]
+                self.seat_regions.append({
+                    "id": seat_config['id'],
+                    "name": seat_config['name'],
+                    "region": region
+                })
+            else:
+                # 交互式选择区域
+                print("请在摄像头画面中用鼠标点击四个点来定义监控区域（顺时针或逆时针顺序）")
+                region = self.initialize_monitor_region()
+                self.seat_regions.append({
+                    "id": 1,
+                    "name": "监控区域",
+                    "region": region
+                })
+                # 保存新的区域配置
+                self.config['seats'] = [{"id": 1, "name": "监控区域", "region": region}]
+                self.save_config(config_file)
+        else:
+            # 如果没有配置，交互式选择区域
+            print("请在摄像头画面中用鼠标点击四个点来定义监控区域（顺时针或逆时针顺序）")
+            region = self.initialize_monitor_region()
             self.seat_regions.append({
-                "id": seat_config['id'],
-                "name": seat_config['name'],
+                "id": 1,
+                "name": "监控区域",
                 "region": region
             })
         
@@ -74,13 +99,17 @@ class SeatMonitor:
         print("座位监控系统已初始化")
         
     def load_config(self, config_file):
-        """加载配置文件"""
+        """加载配置文件，修改为只返回一个座位的配置"""
         try:
             with open(config_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                config = json.load(f)
+                # 确保只保留第一个座位的配置
+                if len(config.get('seats', [])) > 0:
+                    config['seats'] = [config['seats'][0]]
+                return config
         except Exception as e:
             print(f"加载配置文件失败: {str(e)}")
-            # 返回默认配置
+            # 返回默认配置（只有一个座位）
             return {
                 "camera": {
                     "resolution": {"width": 1280, "height": 720},
@@ -89,13 +118,10 @@ class SeatMonitor:
                 },
                 "detection": {
                     "motion_threshold": 10000,
-                    "face_recognition_tolerance": 0.6,
                     "detection_interval": 0.1
                 },
                 "seats": [
-                    {"id": 1, "name": "座位1", "region": [[100, 150], [300, 150], [300, 350], [100, 350]]},
-                    {"id": 2, "name": "座位2", "region": [[350, 150], [550, 150], [550, 350], [350, 350]]},
-                    {"id": 3, "name": "座位3", "region": [[600, 150], [800, 150], [800, 350], [600, 350]]}
+                    {"id": 1, "name": "监控区域", "region": [[100, 150], [300, 150], [300, 350], [100, 350]]}
                 ],
                 "data": {
                     "save_interval": 60,
@@ -127,6 +153,92 @@ class SeatMonitor:
         """简化版：不需要加载已知人脸数据"""
         print("使用简化版检测模式，不加载已知人脸数据")
         pass
+        
+    def initialize_monitor_region(self):
+        """交互式初始化监控区域，用户通过鼠标点击选择四个点"""
+        # 创建窗口
+        window_name = "监控区域选择"
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(window_name, self.config['camera']['resolution']['width'], 
+                         self.config['camera']['resolution']['height'])
+        
+        # 存储用户点击的点
+        points = []
+        drawing = False
+        temp_point = None
+        
+        # 鼠标回调函数
+        def mouse_callback(event, x, y, flags, param):
+            nonlocal points, drawing, temp_point
+            
+            if event == cv2.EVENT_LBUTTONDOWN:
+                if len(points) < 4:
+                    points.append((x, y))
+                    print(f"已选择点 {len(points)}: ({x}, {y})")
+                    if len(points) == 4:
+                        print("已选择四个点，监控区域定义完成")
+            elif event == cv2.EVENT_MOUSEMOVE:
+                temp_point = (x, y)
+        
+        # 设置鼠标回调
+        cv2.setMouseCallback(window_name, mouse_callback)
+        
+        # 显示操作说明
+        print("操作说明：")
+        print("1. 在摄像头画面中用鼠标点击四个点来定义监控区域")
+        print("2. 请按顺时针或逆时针顺序点击四个角点")
+        print("3. 完成四个点的选择后，按任意键继续")
+        
+        # 显示摄像头画面，等待用户选择点
+        while len(points) < 4:
+            # 获取当前帧
+            frame = self.camera.capture_array()
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            
+            # 显示已选择的点
+            for i, (x, y) in enumerate(points):
+                cv2.circle(frame, (x, y), 5, (0, 0, 255), -1)
+                cv2.putText(frame, f"{i+1}", (x+10, y-10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+            
+            # 如果已有点，绘制连线
+            if len(points) > 1:
+                for i in range(len(points) - 1):
+                    cv2.line(frame, points[i], points[i+1], (0, 255, 0), 2)
+                # 如果已有四个点，绘制最后一条连线
+                if len(points) == 4:
+                    cv2.line(frame, points[3], points[0], (0, 255, 0), 2)
+            
+            # 显示操作提示
+            cv2.putText(frame, "点击四个点定义监控区域", (10, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            cv2.putText(frame, f"已选择点数量: {len(points)}/4", (10, 60), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            
+            # 显示画面
+            cv2.imshow(window_name, frame)
+            
+            # 按ESC键取消当前选择的所有点
+            key = cv2.waitKey(1) & 0xFF
+            if key == 27:  # ESC键
+                points = []
+                print("已取消所有选择的点，请重新选择")
+            elif key != 255 and len(points) == 4:
+                break
+        
+        # 关闭窗口
+        cv2.destroyWindow(window_name)
+        
+        return points
+        
+    def save_config(self, config_file):
+        """保存配置到文件"""
+        try:
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.config, f, ensure_ascii=False, indent=2)
+            print(f"配置已保存到 {config_file}")
+        except Exception as e:
+            print(f"保存配置文件失败: {str(e)}")
     
     def detect_person_in_region(self, frame, region):
         """检测指定区域内是否有人"""

@@ -20,6 +20,18 @@ source "$VENV_NAME/bin/activate"
 echo "更新pip..."
 pip install --upgrade pip
     
+    # 检查cmake是否安装（face_recognition/dlib依赖）
+echo "检查cmake是否正确安装..."
+if ! command -v cmake &> /dev/null; then
+        echo "警告：cmake未安装，这将导致face_recognition/dlib安装失败"
+        echo "建议在继续前安装cmake："
+        echo "  sudo apt-get update"
+        echo "  sudo apt-get install -y cmake"
+        echo "  sudo apt-get install -y build-essential libopenblas-dev liblapack-dev libjpeg-dev zlib1g-dev"
+        echo "按Enter键继续安装（可能会失败），或按Ctrl+C取消..."
+        read -r
+    fi
+    
     # 安装项目依赖（包括测试依赖）
 echo "安装项目依赖和测试依赖..."
 if [ -f "requirements.txt" ]; then

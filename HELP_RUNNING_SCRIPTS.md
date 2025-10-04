@@ -86,6 +86,78 @@ sudo pacman -S libcap
 ### 已更新的安装脚本
 setup_venv.sh脚本和README.md文档已经更新，包含了libcap-dev包的安装命令，使用最新版本的脚本可以避免这个问题。
 
+## 关于dlib构建和cmake安装
+
+在安装face_recognition包时，您可能会遇到以下错误：
+```
+CMake is not installed on your system!
+```
+
+### 为什么需要cmake来构建dlib？
+dlib是一个C++库，需要通过cmake工具进行编译才能在Python中使用。face_recognition包依赖于dlib，因此必须正确安装cmake才能成功安装。
+
+### 如何正确安装cmake？
+
+**对于Debian/Ubuntu/Raspberry Pi OS：**
+```bash
+# 安装cmake
+sudo apt-get update
+sudo apt-get install -y cmake
+
+# 验证安装是否成功
+cmake --version
+which cmake
+```
+
+**对于CentOS/RHEL：**
+```bash
+sudo yum install -y cmake
+cmake --version
+```
+
+**对于Fedora：**
+```bash
+sudo dnf install -y cmake
+cmake --version
+```
+
+**对于Arch Linux：**
+```bash
+sudo pacman -S cmake
+cmake --version
+```
+
+### 额外的dlib构建依赖
+除了cmake外，dlib的构建还需要其他开发工具和库：
+
+```bash
+# 对于Debian/Ubuntu/Raspberry Pi OS
+# 安装额外的开发工具和库
+sudo apt-get install -y build-essential libopenblas-dev liblapack-dev libjpeg-dev zlib1g-dev python3-dev git
+```
+
+### 常见问题及解决方案
+
+1. **问题：** 安装了cmake但仍然找不到
+   **解决方案：** 检查cmake是否在PATH中，您可以使用`which cmake`命令查看路径。如果找不到，您可能需要注销并重新登录，或者手动添加到PATH中：
+   ```bash
+   export PATH=$PATH:/usr/bin/cmake
+   ```
+
+2. **问题：** dlib构建过程中出现内存不足错误
+   **解决方案：** 在资源有限的设备上（如Raspberry Pi），您可以限制并行构建线程数：
+   ```bash
+   pip install dlib --no-binary :all: --verbose
+   ```
+
+3. **问题：** Python包管理器包含了损坏的cmake副本
+   **解决方案：** 错误消息中提到的问题，您可能需要删除Python包管理器安装的cmake，然后安装官方版本：
+   ```bash
+   # 检查当前使用的cmake路径
+   which cmake
+   # 如果路径指向Python目录，删除它并重新安装官方版本
+   ```
+
 ## 快速开始
 
 如果您想快速设置和运行座位监控系统，建议使用以下命令：

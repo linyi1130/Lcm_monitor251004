@@ -33,13 +33,26 @@
 
 2. **安装必要的系统依赖**
    ```bash
-   sudo apt install python3-pip python3-opencv libopenjp2-7 libcap-dev -y
+   # 首先单独安装cmake，这对dlib构建非常重要
+   sudo apt update
+   sudo apt install -y cmake
+   
+   # 安装基本系统依赖
+   sudo apt install -y python3-pip python3-opencv libopenjp2-7 libcap-dev
+   
+   # 安装额外的开发工具和库以帮助dlib构建
+   sudo apt install -y build-essential libopenblas-dev liblapack-dev libjpeg-dev zlib1g-dev python3-dev git
    
    # 尝试安装libtiff相关包（根据不同Linux发行版，包名可能有所不同）
-   sudo apt install libtiff5 -y || sudo apt install libtiff-dev -y || sudo apt install libtiff-tools -y
+   sudo apt install -y libtiff5 || sudo apt install -y libtiff-dev || sudo apt install -y libtiff-tools
+   
+   # 验证cmake是否正确安装
+   cmake --version
+   which cmake
    ```
    
-   *注意：如果上述命令执行失败，可能是因为您的Linux发行版中包名称不同。请根据您的系统实际情况安装相应的libtiff包。*
+   *注意1：dlib的构建依赖于cmake，确保cmake命令可以正常运行。*
+   *注意2：如果上述命令执行失败，可能是因为您的Linux发行版中包名称不同。请根据您的系统实际情况安装相应的包。*
 
 3. **克隆项目代码**
    ```bash

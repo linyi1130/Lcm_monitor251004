@@ -40,38 +40,19 @@ class SeatMonitor:
         
         # 设置座位区域
         self.seat_regions = []
-        # 初始化交互式区域选择
-        if len(self.config.get('seats', [])) > 0:
-            use_existing_region = input("是否使用现有监控区域？(y/n): ").strip().lower() == 'y'
-            if use_existing_region:
-                # 使用配置文件中的区域
-                seat_config = self.config['seats'][0]
-                region = [(p[0], p[1]) for p in seat_config['region']]
-                self.seat_regions.append({
-                    "id": seat_config['id'],
-                    "name": seat_config['name'],
-                    "region": region
-                })
-            else:
-                # 交互式选择区域
-                region = self.initialize_monitor_region()
-                self.seat_regions.append({
-                    "id": 1,
-                    "name": "监控区域",
-                    "region": region
-                })
-                # 保存新的区域配置
-                self.config['seats'] = [{"id": 1, "name": "监控区域", "region": region}]
-                self.save_config(config_file)
-        else:
-            # 如果没有配置，交互式选择区域
-            print("请在摄像头画面中用鼠标点击四个点来定义监控区域（顺时针或逆时针顺序）")
-            region = self.initialize_monitor_region()
-            self.seat_regions.append({
-                "id": 1,
-                "name": "监控区域",
-                "region": region
-            })
+        
+        # 默认直接进入交互式区域选择模式
+        print("Starting interactive monitor region selection...")
+        region = self.initialize_monitor_region()
+        self.seat_regions.append({
+            "id": 1,
+            "name": "Monitor Area",
+            "region": region
+        })
+        
+        # 保存新的区域配置
+        self.config['seats'] = [{"id": 1, "name": "Monitor Area", "region": region}]
+        self.save_config(config_file)
         
         # 人员状态跟踪
         self.occupancy_status = {}
@@ -157,53 +138,53 @@ class SeatMonitor:
         pass
         
     def initialize_monitor_region(self):
-        """交互式初始化监控区域，用户通过鼠标点击选择四个点"""
-        # 创建窗口
-        window_name = "监控区域选择"
+        """Interactive monitor region initialization, user selects four points with mouse"""
+        # Create window
+        window_name = "Monitor Region Selection"
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(window_name, self.config['camera']['resolution']['width'], 
                          self.config['camera']['resolution']['height'])
         
-        # 存储用户点击的点
+        # Store clicked points
         points = []
         drawing = False
         temp_point = None
         
-        # 鼠标回调函数
+        # Mouse callback function
         def mouse_callback(event, x, y, flags, param):
             nonlocal points, drawing, temp_point
             
             if event == cv2.EVENT_LBUTTONDOWN:
                 if len(points) < 4:
                     points.append((x, y))
-                    print(f"已选择点 {len(points)}: ({x}, {y})")
+                    print(f"Selected point {len(points)}: ({x}, {y})")
                     if len(points) == 4:
-                        print("已选择四个点，监控区域定义完成")
+                        print("Four points selected, monitor region defined")
             elif event == cv2.EVENT_MOUSEMOVE:
                 temp_point = (x, y)
         
-        # 设置鼠标回调
+        # Set mouse callback
         cv2.setMouseCallback(window_name, mouse_callback)
         
-        # 显示摄像头画面，等待用户选择点
+        # Display camera frame and wait for user to select points
         instructions_shown = False
         while len(points) < 4:
-            # 获取当前帧
+            # Get current frame
             frame = self.camera.capture_array()
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             
-            # 显示已选择的点
+            # Display selected points
             for i, (x, y) in enumerate(points):
                 cv2.circle(frame, (x, y), 5, (0, 0, 255), -1)
                 cv2.putText(frame, f"{i+1}", (x+10, y-10), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
             
-            # 当第一次显示画面时，打印操作说明
+            # When displaying frame for the first time, show instructions
             if not instructions_shown:
-                print("操作说明：")
-                print("1. 在摄像头画面中用鼠标点击四个点来定义监控区域")
-                print("2. 请按顺时针或逆时针顺序点击四个角点")
-                print("3. 完成四个点的选择后，按任意键继续")
+                print("Instructions:")
+                print("1. Click four points in the camera view to define the monitor region")
+                print("2. Click in clockwise or counter-clockwise order")
+                print("3. Press any key to continue after selecting four points")
                 instructions_shown = True
             
             # 如果已有点，绘制连线
@@ -406,50 +387,33 @@ class SeatMonitor:
             print(f"生成报告时出错: {str(e)}")
     
     def draw_overlay(self, frame):
-        """在视频帧上绘制座位区域和状态，支持中文显示"""
-        # 将OpenCV的BGR图像转换为PIL的RGB图像
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        pil_img = Image.fromarray(frame_rgb)
-        draw = ImageDraw.Draw(pil_img)
-        
-        # 尝试加载支持中文的字体
-        try:
-            # 尝试使用系统默认中文字体
-            font = ImageFont.truetype("simhei.ttf", 14)  # 宋体
-        except IOError:
-            try:
-                font = ImageFont.truetype("Arial Unicode.ttf", 14)
-            except IOError:
-                # 如果找不到中文字体，使用默认字体
-                font = ImageFont.load_default()
-        
+        """Draw seat regions and status on video frame"""
         for seat in self.seat_regions:
             seat_id = seat['id']
             region = seat['region']
             status = self.occupancy_status[seat_id]
             
-            # 根据占用状态设置颜色
+            # Set color based on occupancy status
             color = (0, 0, 255) if status['occupied'] else (0, 255, 0)
             thickness = 2 if status['occupied'] else 1
             
-            # 绘制区域（使用OpenCV）
+            # Draw region
             cv2.polylines(frame, [np.array(region)], True, color, thickness)
             
-            # 显示座位名称和状态（使用PIL）
-            text = f"{seat['name']}: {'有人' if status['occupied'] else '无人'}"
+            # Display seat name and status (using English to avoid display issues)
+            status_text = "Occupied" if status['occupied'] else "Empty"
+            text = f"{seat['name']}: {status_text}"
             if status['occupied'] and status['person_id']:
                 text += f" ({status['person_id']})"
             
-            # 将OpenCV的BGR颜色转换为PIL的RGB颜色
-            pil_color = (color[2], color[1], color[0])
-            draw.text((region[0][0], region[0][1] - 25), text, font=font, fill=pil_color)
+            # Draw text using OpenCV with English
+            cv2.putText(frame, text, (region[0][0], region[0][1] - 10), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
         
-        # 显示当前时间（使用PIL）
+        # Display current time
         current_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        draw.text((10, 10), current_time_str, font=font, fill=(255, 255, 255))
-        
-        # 将PIL图像转换回OpenCV格式
-        frame = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+        cv2.putText(frame, current_time_str, (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
         
         return frame
     

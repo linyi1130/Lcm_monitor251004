@@ -51,7 +51,6 @@ class SeatMonitor:
                 })
             else:
                 # 交互式选择区域
-                print("请在摄像头画面中用鼠标点击四个点来定义监控区域（顺时针或逆时针顺序）")
                 region = self.initialize_monitor_region()
                 self.seat_regions.append({
                     "id": 1,
@@ -183,13 +182,8 @@ class SeatMonitor:
         # 设置鼠标回调
         cv2.setMouseCallback(window_name, mouse_callback)
         
-        # 显示操作说明
-        print("操作说明：")
-        print("1. 在摄像头画面中用鼠标点击四个点来定义监控区域")
-        print("2. 请按顺时针或逆时针顺序点击四个角点")
-        print("3. 完成四个点的选择后，按任意键继续")
-        
         # 显示摄像头画面，等待用户选择点
+        instructions_shown = False
         while len(points) < 4:
             # 获取当前帧
             frame = self.camera.capture_array()
@@ -200,6 +194,14 @@ class SeatMonitor:
                 cv2.circle(frame, (x, y), 5, (0, 0, 255), -1)
                 cv2.putText(frame, f"{i+1}", (x+10, y-10), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+            
+            # 当第一次显示画面时，打印操作说明
+            if not instructions_shown:
+                print("操作说明：")
+                print("1. 在摄像头画面中用鼠标点击四个点来定义监控区域")
+                print("2. 请按顺时针或逆时针顺序点击四个角点")
+                print("3. 完成四个点的选择后，按任意键继续")
+                instructions_shown = True
             
             # 如果已有点，绘制连线
             if len(points) > 1:

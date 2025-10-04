@@ -8,13 +8,13 @@
     "rotation": 0
   },
   "detection": {
-        "motion_threshold": 2000,
+        "motion_threshold": 1000,
         "detection_interval": 0.1,
         "back_sub_history": 300,
         "back_sub_var_threshold": 10,
         "back_sub_var_threshold_gen": 9,
         "bg_learning_rate": 0.01,
-        "static_detection_enabled": true,
+        "static_detection_enabled": false,
         "static_person_min_area_ratio": 0.05,
         "leave_detection_threshold": 15,
         "contour_aspect_ratio_min": 0.2,
@@ -27,10 +27,10 @@
       "id": 1,
       "name": "监控区域",
       "region": [
-        [200, 100],
-        [1000, 100],
-        [1000, 600],
-        [200, 600]
+        [0, 0],
+        [1280, 0],
+        [1280, 720],
+        [0, 720]
       ]
     }
   ],

@@ -41,21 +41,34 @@ class SeatMonitor:
             self.camera.rotation = self.config['camera']['rotation']
         print(f"摄像头已启动，分辨率: {self.config['camera']['resolution']['width']}x{self.config['camera']['resolution']['height']}")
         
-        # 设置座位区域
+        # 设置座位区域 - 直接使用配置文件中的区域
         self.seat_regions = []
         
-        # 默认直接进入交互式区域选择模式
-        print("Starting interactive monitor region selection...")
-        region = self.initialize_monitor_region()
-        self.seat_regions.append({
-            "id": 1,
-            "name": "Monitor Area",
-            "region": region
-        })
-        
-        # 保存新的区域配置
-        self.config['seats'] = [{"id": 1, "name": "Monitor Area", "region": region}]
-        self.save_config(config_file)
+        # 检查配置文件中是否有座位区域定义
+        if 'seats' in self.config and len(self.config['seats']) > 0:
+            # 直接使用配置文件中的第一个座位区域
+            self.seat_regions.append({
+                "id": self.config['seats'][0]['id'],
+                "name": self.config['seats'][0]['name'],
+                "region": self.config['seats'][0]['region']
+            })
+            print(f"已加载配置文件中的监控区域，大小: {self.config['camera']['resolution']['width']}x{self.config['camera']['resolution']['height']}")
+            self.log_message(f"已加载配置文件中的监控区域，大小: {self.config['camera']['resolution']['width']}x{self.config['camera']['resolution']['height']}", "INFO")
+        else:
+            # 如果没有定义，使用默认的全屏区域
+            default_region = [
+                [0, 0],
+                [self.config['camera']['resolution']['width'], 0],
+                [self.config['camera']['resolution']['width'], self.config['camera']['resolution']['height']],
+                [0, self.config['camera']['resolution']['height']]
+            ]
+            self.seat_regions.append({
+                "id": 1,
+                "name": "默认监控区域",
+                "region": default_region
+            })
+            print("未在配置文件中找到区域定义，使用默认的全屏监控区域")
+            self.log_message("未在配置文件中找到区域定义，使用默认的全屏监控区域", "INFO")
         
         # 人员状态跟踪
         self.occupancy_status = {}
@@ -87,8 +100,9 @@ class SeatMonitor:
         # 初始化背景减除器，用于改进人员检测
         self.initialize_background_subtractor()
         
-        print("座位监控系统已初始化")
-        
+        print("座位监控系统已初始化 - 简化版")
+        self.log_message("座位监控系统已初始化 - 简化版，使用全屏监控区域", "INFO")
+    
     def load_config(self, config_file):
         """加载配置文件，修改为只返回一个座位的配置"""
         try:
@@ -149,34 +163,32 @@ class SeatMonitor:
         pass
         
     def initialize_background_subtractor(self):
-        """初始化背景减除器，平衡敏感性和稳定性"""
+        """初始化背景减除器，用于简化版的前景检测"""
         try:
-            # 获取配置参数 - 优化以减少背景误判
-            history = self.config['detection'].get('back_sub_history', 300)  # 降低历史记录，加快适应新环境
-            var_threshold = self.config['detection'].get('back_sub_var_threshold', 10)  # 降低阈值，提高检测灵敏度
-            var_threshold_gen = self.config['detection'].get('back_sub_var_threshold_gen', 5)
+            # 从配置文件读取参数
+            static_detection_enabled = self.config['detection'].get('static_detection_enabled', False)
             
-            # 创建背景减除器
+            # 记录静态检测状态
+            if static_detection_enabled:
+                self.log_message("警告：配置文件中静态检测已启用，但当前为简化版，静态检测功能将被忽略", "WARNING")
+            else:
+                self.log_message("静态检测已禁用，使用简化的前景检测模式", "INFO")
+            
+            # 获取配置参数
+            history = self.config['detection'].get('back_sub_history', 300)
+            var_threshold = self.config['detection'].get('back_sub_var_threshold', 10)
+            
+            # 创建背景减除器，关闭阴影检测以简化处理
             self.back_sub = cv2.createBackgroundSubtractorMOG2(
                 history=history,
                 varThreshold=var_threshold,
-                detectShadows=True
+                detectShadows=False
             )
             
-            # 调整背景减除器参数
-            if hasattr(self.back_sub, 'setVarThresholdGen'):
-                self.back_sub.setVarThresholdGen(var_threshold_gen)
+            # 设置学习率，使用较高的学习率以加快背景适应
+            self.bg_learning_rate = 0.01  # 适中的学习率，平衡敏感性和稳定性
             
-            # 设置阴影阈值，改善阴影处理
-            if hasattr(self.back_sub, 'setShadowThreshold'):
-                self.back_sub.setShadowThreshold(0.6)  # 适当降低阴影阈值
-            
-            # 调整学习率，增强背景更新速度以改善离开检测
-            self.bg_learning_rate = 0.005  # 大幅提高学习率，帮助系统更快适应人员离开后的背景变化
-            # 离开检测专用的临时高学习率
-            self.leave_detection_learning_rate = 0.03
-            
-            print(f"背景减除器初始化成功（平衡模式）: 历史帧={history}, 方差阈值={var_threshold}, 学习率={self.bg_learning_rate}")
+            print(f"背景减除器初始化成功（简化版）: 历史帧={history}, 方差阈值={var_threshold}, 学习率={self.bg_learning_rate}")
             self.log_message(f"背景减除器初始化成功: 历史帧={history}, 方差阈值={var_threshold}, 学习率={self.bg_learning_rate}")
         except Exception as e:
             error_msg = f"初始化背景减除器失败: {str(e)}"
@@ -305,177 +317,84 @@ class SeatMonitor:
         except Exception as e:
             print(f"保存配置文件失败: {str(e)}")
     
-    def detect_person_in_region(self, frame, region, seat_id):
-        """检测区域内是否有人，返回检测结果和人员ID"""
-        # 提取感兴趣区域
+    def detect_person_in_region(self, frame, region, seat_id=None):
+        """检测指定区域内是否有人"""
+        if frame is None or region is None:
+            self.log_message("检测失败：无效的帧或区域", "ERROR")
+            return False, None
+        
+        # 创建区域掩码
+        mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+        pts = np.array(region, np.int32)
+        cv2.fillPoly(mask, [pts], 255)
+        
+        # 计算区域的最小包围矩形以提取ROI
         x = min([p[0] for p in region])
         y = min([p[1] for p in region])
         w = max([p[0] for p in region]) - x
         h = max([p[1] for p in region]) - y
-        roi = frame[y:y+h, x:x+w].copy()
         
-        # 记录ROI大小到日志
-        self.log_message(f"座位{seat_id} - ROI大小: {w}x{h}", "DEBUG")
-        
-        # 检查ROI是否有效 - 首先检查，避免后续不必要的处理
-        if roi is None or roi.size == 0:
-            self.log_message(f"座位{seat_id} - 警告: ROI无效，尺寸: {w}x{h}", "WARNING")
+        # 检查ROI是否有效
+        if w <= 0 or h <= 0:
+            self.log_message("无效的ROI尺寸", "ERROR")
             return False, None
         
-        # 确保背景减除器已初始化
+        # 确保ROI不超出帧边界
+        x = max(0, x)
+        y = max(0, y)
+        w = min(w, frame.shape[1] - x)
+        h = min(h, frame.shape[0] - y)
+        
+        # 提取ROI
+        roi = frame[y:y+h, x:x+w].copy()
+        if roi is None or roi.size == 0:
+            self.log_message("无法提取有效的ROI", "ERROR")
+            return False, None
+        
+        # 应用区域掩码
+        roi_mask = mask[y:y+h, x:x+w]
+        if roi_mask.shape[:2] != roi.shape[:2]:
+            roi_mask = cv2.resize(roi_mask, (roi.shape[1], roi.shape[0]))
+        
+        # 初始化背景减法器（如果尚未初始化）
         if not hasattr(self, 'back_sub') or self.back_sub is None:
-            self.log_message("背景减除器未初始化，调用初始化方法...", "INFO")
-            self.initialize_background_subtractor()
+            self.back_sub = cv2.createBackgroundSubtractorMOG2(history=300, varThreshold=10, detectShadows=False)
+            self.log_message("背景减法器已初始化", "DEBUG")
         
-        # 获取配置参数
-        min_area = self.config['detection']['motion_threshold']
-        static_detection_enabled = self.config['detection'].get('static_detection_enabled', True)
+        # 获取当前学习率（默认或从配置读取）
+        learning_rate = getattr(self, 'bg_learning_rate', 0.01)
         
-        # 计算ROI面积
+        # 应用背景减法获取前景掩码
+        fg_mask = self.back_sub.apply(roi, learningRate=learning_rate)
+        
+        # 应用区域掩码到前景掩码
+        fg_mask = cv2.bitwise_and(fg_mask, roi_mask)
+        
+        # 阈值化处理，去除阴影
+        _, fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
+        
+        # 计算前景面积
+        fg_area = cv2.countNonZero(fg_mask)
+        
+        # 计算区域总面积
         roi_area = w * h
         
-        # 使用背景减除获取前景掩码
-        motion_contours = []
-        fg_mask = None
-        fg_area = 0
-        if hasattr(self, 'back_sub') and self.back_sub is not None:
-            self.log_message(f"座位{seat_id} - 背景减除器状态: 已初始化, 学习率: {self.bg_learning_rate}", "DEBUG")
-            try:
-                # 使用背景减除获取前景掩码，控制学习率以减慢背景更新
-                fg_mask = self.back_sub.apply(roi, learningRate=self.bg_learning_rate)
-                
-                # 去除阴影（通常值为127）
-                _, fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
-                
-                # 形态学操作，填充小洞和消除小物体
-                kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-                kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-                fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel_close)
-                fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel_open)
-                
-                # 计算前景面积
-                fg_area = cv2.countNonZero(fg_mask)
-                fg_ratio = fg_area / roi_area if roi_area > 0 else 0
-                self.log_message(f"座位{seat_id} - 背景减除 - 前景面积: {fg_area}, ROI面积: {w*h}, 占比: {fg_ratio*100:.1f}%")
-                
-                # 查找轮廓
-                motion_contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                self.log_message(f"座位{seat_id} - 运动轮廓数量: {len(motion_contours)}", "DEBUG")
-                
-                # 保存前景掩码用于调试显示
-                self.debug_fg_mask = fg_mask
-            except Exception as e:
-                self.log_message(f"座位{seat_id} - 背景减除处理失败: {str(e)}", "ERROR")
-                motion_contours = []
-        else:
-            self.log_message(f"座位{seat_id} - 警告: 背景减除器不可用", "WARNING")
-            motion_contours = []
-
-        # 静态特征检测（仅作为补充）
-        static_area = 0
-        static_ratio = 0
-        if static_detection_enabled:
-            self.log_message(f"座位{seat_id} - 静态检测: 已启用", "DEBUG")
-            # 转换为灰度图进行静态轮廓检测
-            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-            blurred = cv2.GaussianBlur(gray, (3, 3), 0)  # 更小的高斯核，保留更多细节
-            
-            # 自适应阈值，更好地适应光线变化
-            thresh = cv2.adaptiveThreshold(blurred, 255, 
-                                           cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                           cv2.THRESH_BINARY_INV, 7, 1)  # 更小的块大小，提高敏感度
-            
-            # 形态学操作，简化以保留更多信息
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-            thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-            
-            # 计算静态阈值面积
-            static_area = cv2.countNonZero(thresh)
-            static_ratio = static_area / roi_area if roi_area > 0 else 0
-            self.log_message(f"座位{seat_id} - 静态检测 - 阈值面积: {static_area}, 占比: {static_ratio*100:.1f}%")
-        else:
-            self.log_message(f"座位{seat_id} - 静态检测: 已禁用", "DEBUG")
+        # 计算前景面积占比
+        fg_ratio = fg_area / roi_area if roi_area > 0 else 0
         
-        # 设置合理的检测阈值
-        fg_area_threshold = w*h*0.02  # 前景检测阈值
-        static_area_threshold = w*h*0.10  # 提高静态检测阈值，减少误报
+        # 简单的运动检测逻辑：如果前景面积超过阈值，则认为有人
+        # 由于使用整个画面，我们使用相对较小的阈值（1%）
+        motion_threshold = 0.01  # 面积占比阈值
         
-        # 获取当前座位状态
-        current_occupied = seat_id in self.occupancy_status and self.occupancy_status[seat_id]['occupied']
+        # 判断是否检测到人
+        person_detected = fg_ratio > motion_threshold
         
-        # 简化检测逻辑，优先信任前景检测结果
-        person_detected = False
+        # 日志记录
+        self.log_message(f"区域检测 - 前景面积: {fg_area} ({fg_ratio*100:.2f}%), 阈值: {motion_threshold*100:.2f}%, 检测结果: {'有人' if person_detected else '无人'}", "DEBUG")
         
-        # 1. 检查前景掩码结果 - 主要用于检测是否有人
-        if fg_area > fg_area_threshold:
-            # 额外检查：确保有足够大的连通区域
-            if fg_mask is not None:
-                num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(fg_mask)
-                large_components = 0
-                for i in range(1, num_labels):
-                    if stats[i, cv2.CC_STAT_AREA] > fg_area_threshold * 0.5:
-                        large_components += 1
-                
-                if large_components > 0:
-                    person_detected = True
-                    self.log_message(f"座位{seat_id} - 前景检测: 检测到{large_components}个大连通区域，认为有人")
-        else:
-            self.log_message(f"座位{seat_id} - 前景检测: 前景面积小于阈值，认为无人")
+        # 对于简化版本，不进行人脸识别或跟踪
+        person_id = None
         
-        # 2. 静态检测仅在特殊情况下作为补充
-        # 已占用状态下，仅当静态面积非常大时才覆盖前景检测结果
-        if static_detection_enabled and not person_detected and current_occupied:
-            if static_ratio > 0.15:  # 静态面积占比大于15%才考虑
-                person_detected = True
-                self.log_message(f"座位{seat_id} - 静态检测: 静态面积占比{static_ratio*100:.1f}%大于15%，覆盖前景检测结果，认为有人")
-            else:
-                self.log_message(f"座位{seat_id} - 静态检测: 静态面积小于阈值，已占用状态下优先信任前景检测结果，认为无人")
-        
-        # 3. 空闲状态下，静态检测可以稍微宽松一些（防止遗漏检测）
-        elif static_detection_enabled and not person_detected and not current_occupied:
-            if static_ratio > static_area_threshold:
-                person_detected = True
-                self.log_message(f"座位{seat_id} - 静态检测: 静态面积大于阈值，空闲状态下认为有人")
-            else:
-                self.log_message(f"座位{seat_id} - 静态检测: 静态面积小于阈值，认为无人")
-        
-        # 4. 智能确认模式：平衡误报和漏报
-        if seat_id in self.occupancy_status:
-            if not self.occupancy_status[seat_id]['occupied']:
-                # 空闲状态：需要更严格的条件才确认检测到人
-                if person_detected:
-                    # 额外验证：检查是否有足够大的连通区域
-                    if fg_mask is not None:
-                        # 查找连通区域
-                        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(fg_mask)
-                        # 检查是否有较大的连通区域
-                        large_components = 0
-                        for i in range(1, num_labels):  # 跳过背景
-                            if stats[i, cv2.CC_STAT_AREA] > fg_area_threshold:
-                                large_components += 1
-                        
-                        if large_components > 0:
-                            self.log_message(f"座位{seat_id} - 智能确认: 空闲状态下检测到人并通过连通区域验证，确认结果")
-                        else:
-                            # 没有足够大的连通区域，可能是背景噪声
-                            person_detected = False
-                            self.log_message(f"座位{seat_id} - 智能过滤: 检测到变化但未通过连通区域验证，可能是背景噪声，过滤误报")
-            else:
-                # 已占用状态：优化离开检测逻辑，强调前景检测结果
-                if not person_detected:
-                    # 如果前景面积非常小，则优先认为人已离开
-                    if fg_ratio < 0.005:  # 前景面积小于0.5%
-                        self.log_message(f"座位{seat_id} - 已占用状态下前景面积极小({fg_ratio*100:.1f}%), 强烈暗示人员已离开，强制认为无人")
-                    else:
-                        self.log_message(f"座位{seat_id} - 已占用状态下未检测到人，将在update_occupancy_status中进行离开确认")
-                else:
-                    # 检测到人，通过update_occupancy_status中的逻辑重置计数器
-                    self.log_message(f"座位{seat_id} - 已占用状态下检测到人，重置离开计数器")
-        
-        # 简化版：只检测是否有人，不进行人脸识别
-        person_id = "有人" if person_detected else None
-        
-        self.log_message(f"座位{seat_id} - 检测结果: 检测到人={person_detected}, 人员ID={person_id}")
         return person_detected, person_id
     
     def update_occupancy_status(self, frame):
@@ -546,62 +465,8 @@ class SeatMonitor:
                 
                 # 如果当前是已占用状态，检查是否需要触发离开确认
                 if self.occupancy_status[seat_id]['occupied']:
-                    # 获取当前ROI区域大小
-                    x = min([p[0] for p in region])
-                    y = min([p[1] for p in region])
-                    w = max([p[0] for p in region]) - x
-                    h = max([p[1] for p in region]) - y
-                    roi_area = w * h
-                    
-                    # 增强型离开确认逻辑
-                    leave_confirmed = False
-                    
-                    # 检查离开计数器阈值
-                    if self.leave_counters[seat_id] >= 2:  # 阈值设置为较低值，提高响应速度
-                        self.log_message(f"座位{seat_id} - 离开计数器达到阈值: {self.leave_counters[seat_id]}", "INFO")
-                        
-                        # 临时提高学习率
-                        self.bg_learning_rate = 0.05
-                        self.log_message(f"座位{seat_id} - 提高临时学习率至: {self.bg_learning_rate}", "DEBUG")
-                        
-                        # 重新提取ROI进行前景和静态面积检查
-                        roi = frame[y:y+h, x:x+w].copy()
-                        if roi is not None and roi.size > 0:
-                            # 检查前景面积
-                            fg_mask = self.back_sub.apply(roi, learningRate=self.bg_learning_rate)
-                            _, fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
-                            fg_area = cv2.countNonZero(fg_mask)
-                            
-                            # 检查静态面积
-                            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-                            blurred = cv2.GaussianBlur(gray, (3, 3), 0)
-                            thresh = cv2.adaptiveThreshold(blurred, 255, 
-                                                           cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                                           cv2.THRESH_BINARY_INV, 7, 1)
-                            static_area = cv2.countNonZero(thresh)
-                            
-                            # 计算前景和静态面积的占比
-                            fg_ratio = fg_area / roi_area if roi_area > 0 else 0
-                            static_ratio = static_area / roi_area if roi_area > 0 else 0
-                            
-                            self.log_message(f"座位{seat_id} - 离开确认 - 前景面积: {fg_area} ({fg_ratio*100:.1f}%), 静态面积: {static_area} ({static_ratio*100:.1f}%)")
-                            
-                            # 简化的离开确认逻辑：
-                            # 1. 如果前景面积非常小，直接确认离开
-                            if fg_ratio < 0.005:  # 前景面积小于0.5%
-                                self.log_message(f"座位{seat_id} - 前景面积极小({fg_ratio*100:.1f}%), 强烈暗示人员已离开，强制确认离开")
-                                leave_confirmed = True
-                            # 2. 或者离开计数器达到较高阈值，也确认离开
-                            elif self.leave_counters[seat_id] >= 5:
-                                self.log_message(f"座位{seat_id} - 离开计数器达到较高阈值，确认离开")
-                                leave_confirmed = True
-                            else:
-                                self.log_message(f"座位{seat_id} - 未满足离开条件，继续观察")
-                        else:
-                            self.log_message(f"座位{seat_id} - ROI无效，无法计算前景和静态面积")
-                    
-                    # 如果确认离开，更新状态并记录
-                    if leave_confirmed:
+                    # 简化的离开确认逻辑：只要连续未检测到人达到阈值，就确认离开
+                    if self.leave_counters[seat_id] >= 3:  # 适中的阈值，平衡误报和响应速度
                         # 记录结束时间和持续时间
                         end_time = datetime.datetime.now()
                         start_time = self.occupancy_status[seat_id]['start_time']
@@ -614,9 +479,7 @@ class SeatMonitor:
                             'duration': duration
                         })
                         
-                        # 记录离开事件
-                        leave_reason = "前景面积极小" if fg_ratio < 0.005 else "离开计数器达到阈值"
-                        self.log_message(f"座位{seat_id} - 状态变更: 已占用 -> 空闲, 持续时间: {duration:.2f}秒, 原因: {leave_reason}", "INFO")
+                        self.log_message(f"座位{seat_id} - 状态变更: 已占用 -> 空闲, 持续时间: {duration:.2f}秒, 原因: 连续{self.leave_counters[seat_id]}帧未检测到人", "INFO")
                         
                         # 重置离开计数器
                         self.leave_counters[seat_id] = 0
@@ -629,7 +492,7 @@ class SeatMonitor:
         
         # 定期保存数据
         if self.save_interval and (datetime.datetime.now() - self.last_save_time).seconds >= self.save_interval:
-            self.save_current_state()  # 使用已存在的save_current_state方法替代不存在的save_data方法
+            self.save_current_state()
             self.last_save_time = datetime.datetime.now()
             self.log_message(f"定期保存数据: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", "INFO")
         

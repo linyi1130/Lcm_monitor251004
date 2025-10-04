@@ -166,8 +166,8 @@ class SeatMonitor:
             if hasattr(self.back_sub, 'setShadowThreshold'):
                 self.back_sub.setShadowThreshold(0.7)  # 增加阴影阈值，更好地识别阴影中的人体
             
-            # 配置学习率，降低背景更新速度以减少误报
-            self.bg_learning_rate = self.config['detection'].get('bg_learning_rate', 0.001)  # 降低学习率，使背景模型更稳定
+            # 配置学习率，提高背景更新速度以适应人员移动
+            self.bg_learning_rate = self.config['detection'].get('bg_learning_rate', 0.01)  # 提高学习率，使背景模型能够快速适应场景变化
             
             print("背景减除器初始化成功（已优化人体检测灵敏度）")
         except Exception as e:
@@ -345,8 +345,8 @@ class SeatMonitor:
         for contour in all_contours:
             area = cv2.contourArea(contour)
             
-            # 面积条件：增加阈值减少误报
-            if area > min_area or (static_detection_enabled and area > min_static_area):
+            # 面积条件：大幅降低阈值，提高检测灵敏度
+            if area > min_area * 0.3 or (static_detection_enabled and area > min_static_area * 0.3):
                 # 计算轮廓的边界框
                 x_rect, y_rect, w_rect, h_rect = cv2.boundingRect(contour)
                 
@@ -363,35 +363,37 @@ class SeatMonitor:
                 # 计算轮廓的中心位置
                 contour_center_y = y_rect + h_rect / 2
                 
-                # 上半身检测条件 - 收紧条件减少误报
+                # 上半身检测条件 - 大幅放宽条件，提高检测率
                 is_upper_body_candidate = False
                 
-                # 条件1: 宽高比在正常范围内
-                # 条件2: 高度占ROI的一定比例
-                # 条件3: 轮廓中心位置
-                # 条件4: 紧凑度
-                if ((aspect_ratio_min < aspect_ratio < aspect_ratio_max) and 
-                    h_rect > h * upper_body_min_height_ratio and 
-                    (abs(contour_center_y - h/2) < h * upper_body_center_offset) and 
-                    compactness < 0.8):  # 收紧紧凑度要求
+                # 条件1: 宽高比范围大幅放宽
+                # 条件2: 降低高度要求
+                # 条件3: 放宽中心位置要求
+                # 条件4: 大幅放宽紧凑度要求
+                if ((aspect_ratio_min * 0.5 < aspect_ratio < aspect_ratio_max * 2.0) and 
+                    h_rect > h * upper_body_min_height_ratio * 0.5 and 
+                    (abs(contour_center_y - h/2) < h * upper_body_center_offset * 2.0 or 
+                     # 额外条件：轮廓在ROI的任何位置都可能是上半身
+                     True) and 
+                    compactness < 0.95):  # 大幅放宽紧凑度要求
                     is_upper_body_candidate = True
                 
-                # 额外的头部检测启发式方法：寻找ROI顶部的小而圆的轮廓（可能是头部）
+                # 额外的头部检测启发式方法：寻找可能的头部轮廓
                 has_potential_head = False
-                # 收紧头部检测条件
-                if h_rect > h * 0.25 and h_rect < h * 0.5 and y_rect < h * 0.3:  # 限制头部的位置和大小范围
+                # 大幅放宽头部检测条件
+                if h_rect > h * 0.15 and y_rect < h * 0.4:  # 放宽头部的位置和大小范围
                     # 检查轮廓是否有类似头部的特征
-                    if w_rect > h_rect * 0.8 and w_rect < h_rect * 1.2 and compactness > 0.4:  # 头部通常更圆润
+                    if w_rect > h_rect * 0.5 and compactness > 0.3:  # 大幅放宽头部特征要求
                         has_potential_head = True
                 
-                # 针对静态人体的检测条件 - 收紧条件减少误报
+                # 针对静态人体的检测条件 - 大幅放宽条件
                 is_static_person_candidate = False
-                if static_detection_enabled and area > min_static_area * 0.8:  # 提高面积要求
+                if static_detection_enabled and area > min_static_area * 0.3:  # 大幅降低面积要求
                     # 静态人体通常有一定的宽高比和面积特征
-                    if (aspect_ratio_min * 0.7 < aspect_ratio < aspect_ratio_max * 1.5 and  # 收紧范围
-                        h_rect > h * 0.3 and  # 提高高度要求
-                        (w_rect > w * 0.25 and  # 提高宽度要求
-                         area > w * h * 0.06)):  # 提高面积比例要求
+                    if (aspect_ratio_min * 0.3 < aspect_ratio < aspect_ratio_max * 3.0 and  # 大幅放宽范围
+                        h_rect > h * 0.15 and  # 大幅降低高度要求
+                        (w_rect > w * 0.1 or  # 大幅放宽宽度要求
+                         area > w * h * 0.02)):  # 大幅降低面积比例要求
                         is_static_person_candidate = True
                 
                 # 综合判断：满足上半身条件、有头部特征或满足静态人体条件，则认为检测到人

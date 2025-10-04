@@ -137,6 +137,7 @@ class SeatMonitor:
             }
             # 初始化离开计数器
             self.leave_counters[seat['id']] = 0
+            print(f"初始化座位{seat['id']}状态: 空闲")  # 调试信息
     
     def load_known_faces(self):
         """简化版：不需要加载已知人脸数据"""
@@ -264,57 +265,108 @@ class SeatMonitor:
             print(f"保存配置文件失败: {str(e)}")
     
     def detect_person_in_region(self, frame, region):
-        """检测指定区域内是否有人，优化算法以适应静止人体、背影和上半身为主的情况"""
-        # 提取区域ROI
+        """检测区域内是否有人，返回检测结果和人员ID"""
+        # 提取感兴趣区域
         x = min([p[0] for p in region])
         y = min([p[1] for p in region])
         w = max([p[0] for p in region]) - x
         h = max([p[1] for p in region]) - y
         roi = frame[y:y+h, x:x+w].copy()
         
+        # 检查ROI是否有效 - 首先检查，避免后续不必要的处理
+        if roi is None or roi.size == 0:
+            print(f"警告: ROI无效，尺寸: {w}x{h}")
+            return False, None
+        
         # 获取配置参数
         min_area = self.config['detection']['motion_threshold']
         static_detection_enabled = self.config['detection'].get('static_detection_enabled', True)
         
-        # 检查是否启用了背景减除
-        if hasattr(self, 'back_sub') and self.back_sub is not None:
-            # 使用背景减除获取前景掩码，控制学习率以减慢背景更新
-            fg_mask = self.back_sub.apply(roi, learningRate=self.bg_learning_rate)
-            
-            # 去除阴影（通常值为127）
-            _, fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
-            
-            # 形态学操作，填充小洞和消除小物体
-            kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-            kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel_close)
-            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel_open)
-            
-            # 查找轮廓
-            motion_contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        else:
-            motion_contours = []
+        # 计算ROI面积用于静态人体检测
+        roi_area = w * h
         
+        # 静态人体检测的额外参数
+        static_person_min_area_ratio = self.config['detection'].get('static_person_min_area_ratio', 0.01)  # 进一步降低静态检测面积比例
+        min_static_area = max(min_area * 0.01, roi_area * static_person_min_area_ratio * 0.01)  # 超级降低最小面积阈值
+        
+        # 初始化背景减除器（如果尚未初始化）
+        if not hasattr(self, 'back_sub') or self.back_sub is None:
+            print("初始化背景减除器...")
+            try:
+                self.back_sub = cv2.createBackgroundSubtractorMOG2(
+                    history=self.config['detection']['back_sub_history'],
+                    varThreshold=self.config['detection']['back_sub_var_threshold'],
+                    detectShadows=True
+                )
+                self.bg_learning_rate = self.config['detection']['bg_learning_rate']
+                print(f"背景减除器已初始化: 历史帧={self.config['detection']['back_sub_history']}, 方差阈值={self.config['detection']['back_sub_var_threshold']}, 学习率={self.bg_learning_rate}")
+            except Exception as e:
+                print(f"初始化背景减除器失败: {str(e)}")
+                self.back_sub = None
+                motion_contours = []
+        
+        # 使用背景减除获取前景掩码
+        motion_contours = []
+        fg_mask = None
+        if hasattr(self, 'back_sub') and self.back_sub is not None:
+            print(f"背景减除器状态: 已初始化, 学习率: {self.bg_learning_rate}")  # 调试信息
+            try:
+                # 使用背景减除获取前景掩码，控制学习率以减慢背景更新
+                fg_mask = self.back_sub.apply(roi, learningRate=self.bg_learning_rate)
+                
+                # 去除阴影（通常值为127）
+                _, fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
+                
+                # 形态学操作，填充小洞和消除小物体
+                kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+                kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+                fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel_close)
+                fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel_open)
+                
+                # 计算前景面积，帮助调试
+                fg_area = cv2.countNonZero(fg_mask)
+                print(f"背景减除 - 前景面积: {fg_area}, ROI面积: {w*h}, 占比: {fg_area/(w*h)*100:.1f}%")  # 调试信息
+                
+                # 查找轮廓
+                motion_contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                print(f"运动轮廓数量: {len(motion_contours)}")  # 调试信息
+                
+                # 保存前景掩码用于调试显示
+                self.debug_fg_mask = fg_mask
+            except Exception as e:
+                print(f"背景减除处理失败: {str(e)}")
+                motion_contours = []
+        else:
+            print("警告: 背景减除器不可用")  # 调试信息
+            motion_contours = []
+
         # 静态特征检测（不依赖运动）
         static_contours = []
+        static_area = 0
         if static_detection_enabled:
+            print("静态检测: 已启用")  # 调试信息
             # 转换为灰度图进行静态轮廓检测
             gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-            blurred = cv2.GaussianBlur(gray, (5, 5), 0)  # 减小高斯核，保留更多细节
+            blurred = cv2.GaussianBlur(gray, (3, 3), 0)  # 更小的高斯核，保留更多细节
             
             # 自适应阈值，更好地适应光线变化
             thresh = cv2.adaptiveThreshold(blurred, 255, 
                                            cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                           cv2.THRESH_BINARY_INV, 11, 2)  # 调整块大小和常数，提高敏感度
+                                           cv2.THRESH_BINARY_INV, 7, 1)  # 更小的块大小，提高敏感度
             
-            # 形态学操作，进一步减少噪音
-            kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))  # 减小闭合核，保留更多小细节
-            kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-            thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel_close)
-            thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel_open)
+            # 形态学操作，简化以保留更多信息
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+            
+            # 计算静态阈值面积
+            static_area = cv2.countNonZero(thresh)
+            print(f"静态检测 - 阈值面积: {static_area}, 占比: {static_area/(w*h)*100:.1f}%")  # 调试信息
             
             # 查找轮廓
             static_contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            print(f"静态轮廓数量: {len(static_contours)}")  # 调试信息
+        else:
+            print("静态检测: 已禁用")  # 调试信息
         
         # 合并运动和静态轮廓检测结果
         all_contours = []
@@ -323,88 +375,31 @@ class SeatMonitor:
         if static_contours and len(static_contours) > 0:
             all_contours.extend(static_contours)
         
-        # 检查是否有足够大的轮廓（可能是人体）
+        # 检查是否有足够大的轮廓（可能是人体） - 超级简化版本
         person_detected = False
+        print(f"ROI尺寸: {w}x{h}, 最小面积阈值: {min_area * 0.01:.1f}, 静态最小面积阈值: {min_static_area:.1f}, 检测到轮廓数量: {len(all_contours)}")  # 调试信息
         
-        # 从配置中读取宽高比范围，适应不同体型和姿态
-        aspect_ratio_min = self.config['detection'].get('contour_aspect_ratio_min', 0.2)
-        aspect_ratio_max = self.config['detection'].get('contour_aspect_ratio_max', 2.0)
+        # 超级简化的检测模式：几乎任何轮廓都被认为是人体
+        # 1. 如果有任何轮廓，默认认为检测到人
+        if len(all_contours) > 0:
+            person_detected = True
+            print("超级简化模式: 检测到轮廓，默认认为检测到人")
         
-        # 针对上半身的特殊配置
-        upper_body_min_height_ratio = self.config['detection'].get('upper_body_min_height_ratio', 0.3)
-        upper_body_center_offset = self.config['detection'].get('upper_body_center_offset', 0.2)
+        # 2. 如果前景面积或静态面积超过ROI的极小比例，也认为检测到人
+        if (fg_mask is not None and cv2.countNonZero(fg_mask) > w*h*0.005) or \
+           (static_detection_enabled and static_area > w*h*0.005):
+            person_detected = True
+            print("超级简化模式: 检测到足够的前景或静态区域，认为检测到人")
         
-        # 静态人体检测的额外参数
-        static_person_min_area_ratio = self.config['detection'].get('static_person_min_area_ratio', 0.05)  # ROI面积的最小比例
-        
-        # 计算ROI面积用于静态人体检测
-        roi_area = w * h
-        min_static_area = max(min_area, roi_area * static_person_min_area_ratio)
-        
-        # 改进的轮廓分析：考虑多个条件，特别优化上半身和静止人体检测
-        for contour in all_contours:
-            area = cv2.contourArea(contour)
-            
-            # 面积条件：大幅降低阈值，提高检测灵敏度
-            if area > min_area * 0.3 or (static_detection_enabled and area > min_static_area * 0.3):
-                # 计算轮廓的边界框
-                x_rect, y_rect, w_rect, h_rect = cv2.boundingRect(contour)
-                
-                # 计算宽高比（上半身通常更宽更矮）
-                aspect_ratio = float(w_rect) / h_rect if h_rect > 0 else 0
-                
-                # 计算轮廓的紧凑度（圆形度）
-                perimeter = cv2.arcLength(contour, True)
-                if perimeter > 0:
-                    compactness = 4 * math.pi * area / (perimeter * perimeter)
-                else:
-                    compactness = 0
-                
-                # 计算轮廓的中心位置
-                contour_center_y = y_rect + h_rect / 2
-                
-                # 上半身检测条件 - 大幅放宽条件，提高检测率
-                is_upper_body_candidate = False
-                
-                # 条件1: 宽高比范围大幅放宽
-                # 条件2: 降低高度要求
-                # 条件3: 放宽中心位置要求
-                # 条件4: 大幅放宽紧凑度要求
-                if ((aspect_ratio_min * 0.5 < aspect_ratio < aspect_ratio_max * 2.0) and 
-                    h_rect > h * upper_body_min_height_ratio * 0.5 and 
-                    (abs(contour_center_y - h/2) < h * upper_body_center_offset * 2.0 or 
-                     # 额外条件：轮廓在ROI的任何位置都可能是上半身
-                     True) and 
-                    compactness < 0.95):  # 大幅放宽紧凑度要求
-                    is_upper_body_candidate = True
-                
-                # 额外的头部检测启发式方法：寻找可能的头部轮廓
-                has_potential_head = False
-                # 大幅放宽头部检测条件
-                if h_rect > h * 0.15 and y_rect < h * 0.4:  # 放宽头部的位置和大小范围
-                    # 检查轮廓是否有类似头部的特征
-                    if w_rect > h_rect * 0.5 and compactness > 0.3:  # 大幅放宽头部特征要求
-                        has_potential_head = True
-                
-                # 针对静态人体的检测条件 - 大幅放宽条件
-                is_static_person_candidate = False
-                if static_detection_enabled and area > min_static_area * 0.3:  # 大幅降低面积要求
-                    # 静态人体通常有一定的宽高比和面积特征
-                    if (aspect_ratio_min * 0.3 < aspect_ratio < aspect_ratio_max * 3.0 and  # 大幅放宽范围
-                        h_rect > h * 0.15 and  # 大幅降低高度要求
-                        (w_rect > w * 0.1 or  # 大幅放宽宽度要求
-                         area > w * h * 0.02)):  # 大幅降低面积比例要求
-                        is_static_person_candidate = True
-                
-                # 综合判断：满足上半身条件、有头部特征或满足静态人体条件，则认为检测到人
-                if is_upper_body_candidate or has_potential_head or is_static_person_candidate:
-                    person_detected = True
-                    print(f"检测到轮廓 - 上半身: {is_upper_body_candidate}, 头部: {has_potential_head}, 静态: {is_static_person_candidate}, 面积: {area:.1f}")  # 调试信息
-                    break
+        # 3. 额外的安全检查：如果没有使用上述简化逻辑检测到人，但有轮廓，则强制认为检测到人
+        if not person_detected and len(all_contours) > 0:
+            print(f"安全检查: 有{len(all_contours)}个轮廓，但之前未检测到人，强制标记为检测到人")
+            person_detected = True
         
         # 简化版：只检测是否有人，不进行人脸识别
         person_id = "有人" if person_detected else None
         
+        print(f"检测结果 - 检测到人: {person_detected}, 人员ID: {person_id}")  # 调试信息
         return person_detected, person_id
     
     def update_occupancy_status(self):
@@ -420,7 +415,9 @@ class SeatMonitor:
             region = seat['region']
             
             # 检测区域内是否有人
+            print(f"座位{seat_id}当前状态: {'已占用' if self.occupancy_status[seat_id]['occupied'] else '空闲'}")  # 调试信息
             person_detected, person_id = self.detect_person_in_region(frame, region)
+            print(f"座位{seat_id} - 检测结果: {'检测到人' if person_detected else '未检测到人'}")  # 调试信息
             
             # 更新占用状态，添加滤波逻辑
             if person_detected:
@@ -435,7 +432,10 @@ class SeatMonitor:
                     print(f"[{current_time}] {seat['name']}被{person_id if person_id else '某人'}占用")
             else:
                 # 没有检测到人
-                if self.occupancy_status[seat_id]['occupied']:
+                # 即使未检测到人，如果当前状态是空闲，也输出调试信息
+                if not self.occupancy_status[seat_id]['occupied']:
+                    print(f"座位{seat_id}持续空闲")  # 调试信息
+                else:
                     # 已经记录为有人，增加离开计数器
                     self.leave_counters[seat_id] += 1
                     
@@ -556,6 +556,9 @@ class SeatMonitor:
     
     def draw_overlay(self, frame):
         """Draw seat regions and status on video frame"""
+        # 创建调试信息区域
+        debug_frame = frame.copy()
+        
         for seat in self.seat_regions:
             seat_id = seat['id']
             region = seat['region']
@@ -566,7 +569,7 @@ class SeatMonitor:
             thickness = 2 if status['occupied'] else 1
             
             # Draw region
-            cv2.polylines(frame, [np.array(region)], True, color, thickness)
+            cv2.polylines(debug_frame, [np.array(region)], True, color, thickness)
             
             # Display seat name and status (using English to avoid display issues)
             status_text = "Occupied" if status['occupied'] else "Empty"
@@ -575,15 +578,35 @@ class SeatMonitor:
                 text += f" ({status['person_id']})"
             
             # Draw text using OpenCV with English
-            cv2.putText(frame, text, (region[0][0], region[0][1] - 10), 
+            cv2.putText(debug_frame, text, (region[0][0], region[0][1] - 10), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            
+            # 添加离开计数器信息
+            counter_text = f"Leave: {self.leave_counters[seat_id]}"
+            cv2.putText(debug_frame, counter_text, (region[0][0], region[-1][1] + 20), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
         
         # Display current time
         current_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cv2.putText(frame, current_time_str, (10, 30), 
+        cv2.putText(debug_frame, current_time_str, (10, 30), 
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
         
-        return frame
+        # 显示前景掩码（如果可用）
+        if hasattr(self, 'debug_fg_mask') and self.debug_fg_mask is not None:
+            # 调整前景掩码大小以适应显示
+            mask_h, mask_w = self.debug_fg_mask.shape
+            # 创建彩色版本的掩码便于查看
+            color_mask = cv2.cvtColor(self.debug_fg_mask, cv2.COLOR_GRAY2BGR)
+            # 在主画面上叠加前景掩码
+            overlay_h, overlay_w = min(200, mask_h), min(200, mask_w)
+            small_mask = cv2.resize(color_mask, (overlay_w, overlay_h))
+            # 将掩码叠加在右上角
+            if overlay_h < debug_frame.shape[0] and overlay_w < debug_frame.shape[1]:
+                debug_frame[10:10+overlay_h, debug_frame.shape[1]-overlay_w-10:debug_frame.shape[1]-10] = small_mask
+                cv2.putText(debug_frame, "FG Mask", (debug_frame.shape[1]-overlay_w-10, 30), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+        
+        return debug_frame
     
     def run(self):
         """运行监控系统"""

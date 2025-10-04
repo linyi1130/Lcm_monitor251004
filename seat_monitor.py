@@ -264,7 +264,7 @@ class SeatMonitor:
         except Exception as e:
             print(f"保存配置文件失败: {str(e)}")
     
-    def detect_person_in_region(self, frame, region):
+    def detect_person_in_region(self, frame, region, seat_id):
         """检测区域内是否有人，返回检测结果和人员ID"""
         # 提取感兴趣区域
         x = min([p[0] for p in region])
@@ -435,7 +435,7 @@ class SeatMonitor:
             
             # 检测区域内是否有人
             print(f"座位{seat_id}当前状态: {'已占用' if self.occupancy_status[seat_id]['occupied'] else '空闲'}")  # 调试信息
-            person_detected, person_id = self.detect_person_in_region(frame, region)
+            person_detected, person_id = self.detect_person_in_region(frame, region, seat_id)
             print(f"座位{seat_id} - 检测结果: {'检测到人' if person_detected else '未检测到人'}")  # 调试信息
             
             # 更新占用状态，添加滤波逻辑
@@ -449,6 +449,7 @@ class SeatMonitor:
                     self.occupancy_status[seat_id]['entry_time'] = current_time
                     self.occupancy_status[seat_id]['person_id'] = person_id
                     print(f"[{current_time}] {seat['name']}被{person_id if person_id else '某人'}占用")
+                    # 单座位模式优化：只监控一个座位时，提高检测灵敏度
             else:
                 # 没有检测到人
                 # 即使未检测到人，如果当前状态是空闲，也输出调试信息

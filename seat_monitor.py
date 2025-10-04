@@ -23,6 +23,7 @@ class SeatMonitor:
         self.config = self.load_config(config_file)
         
         # 初始化摄像头
+        print("初始化摄像头...")
         self.camera = Picamera2()
         camera_config = self.camera.create_preview_configuration(
             main={"size": (self.config['camera']['resolution']['width'], 
@@ -32,6 +33,7 @@ class SeatMonitor:
         self.camera.start()
         if self.config['camera']['rotation'] != 0:
             self.camera.rotation = self.config['camera']['rotation']
+        print(f"摄像头已启动，分辨率: {self.config['camera']['resolution']['width']}x{self.config['camera']['resolution']['height']}")
         
         # 设置座位区域
         self.seat_regions = []
@@ -122,19 +124,9 @@ class SeatMonitor:
             }
     
     def load_known_faces(self):
-        """加载已知人脸数据"""
-        try:
-            for filename in os.listdir(self.known_faces_dir):
-                if filename.endswith('.jpg') or filename.endswith('.png'):
-                    name = os.path.splitext(filename)[0]
-                    image_path = os.path.join(self.known_faces_dir, filename)
-                    image = face_recognition.load_image_file(image_path)
-                    face_encodings = face_recognition.face_encodings(image)
-                    if face_encodings:
-                        self.face_encodings.append(face_encodings[0])
-                        self.face_names.append(name)
-        except Exception as e:
-            print(f"加载已知人脸数据失败: {str(e)}")
+        """简化版：不需要加载已知人脸数据"""
+        print("使用简化版检测模式，不加载已知人脸数据")
+        pass
     
     def detect_person_in_region(self, frame, region):
         """检测指定区域内是否有人"""
@@ -160,21 +152,8 @@ class SeatMonitor:
                 person_detected = True
                 break
         
-        # 人脸检测和识别
-        face_locations = face_recognition.face_locations(roi)
-        face_encodings = face_recognition.face_encodings(roi, face_locations)
-        
-        person_id = None
-        if face_encodings:
-            # 尝试识别已知人脸
-            tolerance = self.config['detection']['face_recognition_tolerance']
-            matches = face_recognition.compare_faces(self.face_encodings, face_encodings[0], tolerance=tolerance)
-            if True in matches:
-                first_match_index = matches.index(True)
-                person_id = self.face_names[first_match_index]
-            else:
-                # 未知人脸，分配临时ID
-                person_id = f"未知{len(self.face_names) + 1}"
+        # 简化版：只检测是否有人，不进行人脸识别
+        person_id = "有人" if person_detected else None
         
         return person_detected, person_id
     
@@ -341,37 +320,64 @@ class SeatMonitor:
         """运行监控系统"""
         try:
             print("座位监控系统已启动，按'q'键退出")
+            print("当前模式：简化版 - 持续显示摄像头内容，检测是否有人")
+            
+            # 初始化显示窗口
+            window_name = '座位监控系统'
+            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(window_name, self.config['camera']['resolution']['width'], 
+                             self.config['camera']['resolution']['height'])
             
             while self.running:
-                # 更新占用状态并获取当前帧
-                frame = self.update_occupancy_status()
-                
-                # 绘制叠加层
-                display_frame = self.draw_overlay(frame)
-                
-                # 显示结果
-                cv2.imshow('座位监控系统', display_frame)
-                
-                # 检查退出按键
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    self.running = False
+                try:
+                    # 更新占用状态并获取当前帧
+                    frame = self.update_occupancy_status()
                     
-                # 根据配置文件中的检测间隔调整帧率
-                time.sleep(self.detection_interval)
+                    # 检查帧是否获取成功
+                    if frame is None or frame.size == 0:
+                        print("警告：未能获取摄像头图像帧")
+                        time.sleep(1)  # 暂停1秒后重试
+                        continue
+                    
+                    # 绘制叠加层
+                    display_frame = self.draw_overlay(frame)
+                    
+                    # 显示结果
+                    cv2.imshow(window_name, display_frame)
+                    
+                    # 检查退出按键
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        self.running = False
+                        
+                    # 根据配置文件中的检测间隔调整帧率
+                    time.sleep(self.detection_interval)
+                except Exception as e:
+                    print(f"处理帧时出错: {str(e)}")
+                    time.sleep(0.5)  # 出错时稍作暂停再继续
         
         except KeyboardInterrupt:
             print("系统被用户中断")
         finally:
             # 清理资源
-            self.camera.stop()
-            cv2.destroyAllWindows()
+            try:
+                self.camera.stop()
+                cv2.destroyAllWindows()
+                print("摄像头已关闭，窗口已销毁")
+            except Exception as e:
+                print(f"清理资源时出错: {str(e)}")
             
-            # 最后保存一次当前状态
-            self.save_current_state()
+            try:
+                # 最后保存一次当前状态
+                self.save_current_state()
+            except Exception as e:
+                print(f"保存状态时出错: {str(e)}")
             
-            # 生成当天的报告
-            today = datetime.date.today()
-            self.generate_daily_report(today)
+            try:
+                # 生成当天的报告
+                today = datetime.date.today()
+                self.generate_daily_report(today)
+            except Exception as e:
+                print(f"生成报告时出错: {str(e)}")
             
             print("座位监控系统已关闭")
 

@@ -5,3 +5,4 @@ pandas
 datetime
 matplotlib
 face_recognition
+pandas-stubs

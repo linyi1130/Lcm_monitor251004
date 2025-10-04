@@ -9,7 +9,6 @@
   },
   "detection": {
     "motion_threshold": 10000,
-    "face_recognition_tolerance": 0.6,
     "detection_interval": 0.1
   },
   "seats": [

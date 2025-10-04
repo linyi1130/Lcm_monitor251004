@@ -16,6 +16,9 @@ import face_recognition
 import os
 import json
 from pathlib import Path
+import cv2
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 class SeatMonitor:
     def __init__(self, config_file='config.json'):
@@ -403,7 +406,23 @@ class SeatMonitor:
             print(f"生成报告时出错: {str(e)}")
     
     def draw_overlay(self, frame):
-        """在视频帧上绘制座位区域和状态"""
+        """在视频帧上绘制座位区域和状态，支持中文显示"""
+        # 将OpenCV的BGR图像转换为PIL的RGB图像
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(frame_rgb)
+        draw = ImageDraw.Draw(pil_img)
+        
+        # 尝试加载支持中文的字体
+        try:
+            # 尝试使用系统默认中文字体
+            font = ImageFont.truetype("simhei.ttf", 14)  # 宋体
+        except IOError:
+            try:
+                font = ImageFont.truetype("Arial Unicode.ttf", 14)
+            except IOError:
+                # 如果找不到中文字体，使用默认字体
+                font = ImageFont.load_default()
+        
         for seat in self.seat_regions:
             seat_id = seat['id']
             region = seat['region']
@@ -413,20 +432,24 @@ class SeatMonitor:
             color = (0, 0, 255) if status['occupied'] else (0, 255, 0)
             thickness = 2 if status['occupied'] else 1
             
-            # 绘制区域
+            # 绘制区域（使用OpenCV）
             cv2.polylines(frame, [np.array(region)], True, color, thickness)
             
-            # 显示座位名称和状态
+            # 显示座位名称和状态（使用PIL）
             text = f"{seat['name']}: {'有人' if status['occupied'] else '无人'}"
             if status['occupied'] and status['person_id']:
                 text += f" ({status['person_id']})"
-            cv2.putText(frame, text, (region[0][0], region[0][1] - 10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            
+            # 将OpenCV的BGR颜色转换为PIL的RGB颜色
+            pil_color = (color[2], color[1], color[0])
+            draw.text((region[0][0], region[0][1] - 25), text, font=font, fill=pil_color)
         
-        # 显示当前时间
+        # 显示当前时间（使用PIL）
         current_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cv2.putText(frame, current_time_str, (10, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        draw.text((10, 10), current_time_str, font=font, fill=(255, 255, 255))
+        
+        # 将PIL图像转换回OpenCV格式
+        frame = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
         
         return frame
     

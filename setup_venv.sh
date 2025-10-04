@@ -31,43 +31,72 @@ fi
 
 # 安装face_recognition的系统依赖（Raspberry Pi OS/Debian）
 echo "正在安装face_recognition所需的系统依赖..."
-# 检查是否是root用户
-if [ "$(id -u)" = "0" ]; then
-    apt-get update
-    # 先单独安装cmake，确保它被正确安装
-    echo "安装cmake..."
-    apt-get install -y cmake
+
+# 执行Raspberry Pi OS特定的cmake安装和验证
+install_cmake_rpi() {
+    # 首先确保apt包列表是最新的
+    sudo apt-get update -y
+    
+    # 移除可能存在的损坏的cmake副本（尤其是来自Python包管理器的）
+    echo "检查并移除可能损坏的cmake副本..."
+    sudo apt-get purge -y cmake
+    sudo rm -rf /usr/local/bin/cmake /usr/local/lib/cmake
+    sudo rm -rf $(python3 -c "import sys; print(sys.prefix)")/bin/cmake
+    
+    # 重新安装官方的cmake包
+    echo "安装官方的cmake包..."
+    sudo apt-get install -y cmake
     
     # 安装其他系统依赖
-    apt-get install -y build-essential libopenblas-dev liblapack-dev libjpeg-dev zlib1g-dev libcap-dev
+    echo "安装dlib构建所需的开发工具和库..."
+    sudo apt-get install -y build-essential libopenblas-dev liblapack-dev libjpeg-dev zlib1g-dev libcap-dev
     
-    # 尝试安装libtiff相关包（根据不同Linux发行版，包名可能有所不同）
-    echo "尝试安装libtiff相关包..."
-    apt-get install -y libtiff5 || apt-get install -y libtiff-dev || apt-get install -y libtiff-tools
+    # 安装libtiff相关包
+    echo "安装libtiff相关包..."
+    sudo apt-get install -y libtiff5 || sudo apt-get install -y libtiff-dev || sudo apt-get install -y libtiff-tools
     
-    # 安装可能有助于dlib构建的额外依赖
-    echo "安装额外的开发工具和库以帮助dlib构建..."
-    apt-get install -y python3-dev git
+    # 安装额外的开发工具
+    echo "安装额外的开发工具..."
+    sudo apt-get install -y python3-dev git python3-pip
     
-    # 检查cmake是否正确安装
+    # 验证cmake是否正确安装
+    echo "验证cmake安装..."
     if command -v cmake &> /dev/null; then
-        echo "cmake已成功安装，版本：$(cmake --version)"
-        echo "cmake路径：$(which cmake)"
+        echo "✓ cmake已成功安装"        
+        echo "版本: $(cmake --version)"
+        echo "路径: $(which cmake)"
+        
+        # 显示cmake的详细信息
+        echo "CMake详细信息:"        
+        sudo dpkg -l | grep cmake
     else
-        echo "警告：cmake安装后无法找到，请手动将cmake添加到PATH中"
+        echo "✗ 警告：cmake安装后无法找到！"
+        echo "请尝试注销并重新登录，或手动将cmake添加到PATH中："
+        echo "export PATH=$PATH:/usr/bin"
+        echo "然后验证：cmake --version"
+        return 1
     fi
+    return 0
+}
+
+# 检查是否是root用户
+if [ "$(id -u)" = "0" ]; then
+    install_cmake_rpi
 else
-    echo "警告：需要root权限安装系统依赖，建议运行以下命令："
-    echo "sudo apt-get update"
-    echo "sudo apt-get install -y cmake"
-    echo "sudo apt-get install -y build-essential libopenblas-dev liblapack-dev libjpeg-dev zlib1g-dev libcap-dev"
-    echo "sudo apt-get install -y python3-dev git"
-    echo "然后尝试安装libtiff相关包："
-    echo "sudo apt-get install -y libtiff5 || sudo apt-get install -y libtiff-dev || sudo apt-get install -y libtiff-tools"
-    echo ""
-    echo "安装完成后，请验证cmake是否正确安装："
+    echo "需要root权限安装系统依赖，正在执行Raspberry Pi OS特定的安装步骤..."
+    # 即使不是root用户，也提供详细的安装命令指导
+    echo "\n请在终端中运行以下命令以安装所有必要的依赖："
+    echo "\n# 完整的Raspberry Pi OS依赖安装命令"    
+    echo "sudo apt-get update -y"
+    echo "sudo apt-get purge -y cmake"
+    echo "sudo rm -rf /usr/local/bin/cmake /usr/local/lib/cmake"
+    echo "sudo rm -rf $(python3 -c "import sys; print(sys.prefix)")/bin/cmake || true"
+    echo "sudo apt-get install -y cmake build-essential libopenblas-dev liblapack-dev libjpeg-dev zlib1g-dev libcap-dev"
+    echo "sudo apt-get install -y python3-dev git python3-pip libtiff5"
+    echo "\n# 验证cmake安装"
     echo "cmake --version"
-    echo "如果找不到cmake命令，请检查是否将其添加到了PATH中"
+    echo "which cmake"
+    echo "\n# 重要提示：安装完成后请重新运行此脚本"
 fi
 
 # 创建虚拟环境

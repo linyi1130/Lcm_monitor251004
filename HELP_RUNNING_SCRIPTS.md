@@ -98,7 +98,36 @@ dlib是一个C++库，需要通过cmake工具进行编译才能在Python中使�
 
 ### 如何正确安装cmake？
 
-**对于Debian/Ubuntu/Raspberry Pi OS：**
+**特别针对Raspberry Pi OS的完整解决方案：**
+
+由于您正在使用Raspberry Pi OS（检测到系统：Linux rapi 6.12.47+rpt-rpi-2712），这里提供专门优化的安装步骤：
+
+```bash
+# 1. 更新包列表
+sudo apt-get update -y
+
+# 2. 移除可能存在的损坏cmake副本（重要步骤）
+sudo apt-get purge -y cmake
+sudo rm -rf /usr/local/bin/cmake /usr/local/lib/cmake
+# 移除Python包管理器可能安装的损坏cmake
+sudo rm -rf $(python3 -c "import sys; print(sys.prefix)")/bin/cmake || true
+
+# 3. 重新安装官方cmake和所有必要的依赖
+sudo apt-get install -y cmake build-essential libopenblas-dev liblapack-dev libjpeg-dev zlib1g-dev libcap-dev
+
+# 4. 安装额外的开发工具
+sudo apt-get install -y python3-dev git python3-pip libtiff5
+
+# 5. 验证cmake安装
+cmake --version
+which cmake
+# 查看cmake详细信息
+dpkg -l | grep cmake
+```
+
+**对于其他Linux发行版：**
+
+**Debian/Ubuntu：**
 ```bash
 # 安装cmake
 sudo apt-get update

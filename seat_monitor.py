@@ -145,12 +145,12 @@ class SeatMonitor:
         pass
         
     def initialize_background_subtractor(self):
-        """初始化背景减除器，专门为静态人体检测优化"""
+        """初始化背景减除器，平衡敏感性和稳定性"""
         try:
-            # 获取配置参数 - 为静态检测优化
-            history = self.config['detection'].get('back_sub_history', 1000)  # 增加历史记录
-            var_threshold = self.config['detection'].get('back_sub_var_threshold', 5)  # 大幅降低阈值，提高敏感度
-            var_threshold_gen = self.config['detection'].get('back_sub_var_threshold_gen', 4)
+            # 获取配置参数 - 优化以减少背景误判
+            history = self.config['detection'].get('back_sub_history', 500)  # 适中的历史记录
+            var_threshold = self.config['detection'].get('back_sub_var_threshold', 15)  # 提高阈值，减少误报
+            var_threshold_gen = self.config['detection'].get('back_sub_var_threshold_gen', 10)
             
             # 创建背景减除器
             self.back_sub = cv2.createBackgroundSubtractorMOG2(
@@ -165,12 +165,12 @@ class SeatMonitor:
             
             # 设置阴影阈值，改善阴影处理
             if hasattr(self.back_sub, 'setShadowThreshold'):
-                self.back_sub.setShadowThreshold(0.5)  # 降低阴影阈值，更好地捕获静态人体
+                self.back_sub.setShadowThreshold(0.7)  # 提高阴影阈值，减少阴影误判
             
-            # 强制降低学习率，防止静态人员被视为背景
-            self.bg_learning_rate = 0.00001  # 极低的学习率
+            # 调整学习率，平衡背景更新速度和稳定性
+            self.bg_learning_rate = 0.0005  # 稍微提高学习率，帮助适应背景变化
             
-            print(f"背景减除器初始化成功（静态检测优化）: 历史帧={history}, 方差阈值={var_threshold}, 学习率={self.bg_learning_rate}")
+            print(f"背景减除器初始化成功（平衡模式）: 历史帧={history}, 方差阈值={var_threshold}, 学习率={self.bg_learning_rate}")
         except Exception as e:
             print(f"初始化背景减除器失败: {str(e)}")
             self.back_sub = None
@@ -369,20 +369,35 @@ class SeatMonitor:
         
         # 超级简化的检测模式：几乎任何轮廓都被认为是人体
         # 1. 首先检查前景掩码和静态阈值结果
-        # 进一步降低阈值，提高敏感度到极限
-        fg_area_threshold = w*h*0.0005  # 降至0.05%的ROI面积 - 极低的阈值
-        static_area_threshold = w*h*0.0005
+        # 调整阈值，减少背景误判
+        fg_area_threshold = w*h*0.01  # 提高至1%的ROI面积 - 减少误报
+        static_area_threshold = w*h*0.02  # 提高至2%的ROI面积
         
         # 2. 检查是否有足够的前景或静态区域（主要检测手段）
         if (fg_mask is not None and cv2.countNonZero(fg_mask) > fg_area_threshold) or \
            (static_detection_enabled and static_area > static_area_threshold):
-            person_detected = True
-            print(f"主要检测: 检测到足够的前景或静态区域（前景>{fg_area_threshold},静态>{static_area_threshold}），认为检测到人")
+            # 增加轮廓面积验证，过滤掉小的背景干扰
+            valid_contours = []
+            for contour in all_contours:
+                area = cv2.contourArea(contour)
+                if area > fg_area_threshold:
+                    valid_contours.append(contour)
+            
+            if len(valid_contours) > 0:
+                person_detected = True
+                print(f"主要检测: 检测到足够的前景或静态区域（前景>{fg_area_threshold},静态>{static_area_threshold}）和有效轮廓，认为检测到人")
         
-        # 3. 如果有任何轮廓，也认为检测到人（额外保障）
-        if len(all_contours) > 0:
-            person_detected = True
-            print(f"轮廓检测: 检测到{len(all_contours)}个轮廓，认为检测到人")
+        # 3. 轮廓验证：只有足够大的轮廓才认为检测到人
+        if not person_detected:
+            valid_contours = []
+            for contour in all_contours:
+                area = cv2.contourArea(contour)
+                if area > fg_area_threshold:
+                    valid_contours.append(contour)
+                    
+            if len(valid_contours) > 0:
+                person_detected = True
+                print(f"轮廓检测: 检测到{len(valid_contours)}个有效轮廓（面积>{fg_area_threshold}），认为检测到人")
         
         # 4. 基于色彩的检测补充：检查ROI中是否有明显的肤色区域
         if not person_detected and roi.size > 0:
@@ -399,21 +414,48 @@ class SeatMonitor:
                 person_detected = True
                 print(f"肤色检测: 检测到肤色区域（面积={skin_area}），认为检测到人")
         
-        # 5. 强制检测模式：始终优先检测到人（防止漏报）
-        # 对于这个特定场景，我们更倾向于误报而不是漏报
-        if seat_id in self.occupancy_status and not self.occupancy_status[seat_id]['occupied']:
-            # 空闲状态时，如果有任何可能的人体迹象，就认为检测到人
-            if person_detected:
-                print("强制确认: 空闲状态下检测到人，确认结果")
+        # 5. 智能确认模式：平衡误报和漏报
+        # 改进逻辑，避免将背景误判为人
+        if seat_id in self.occupancy_status:
+            if not self.occupancy_status[seat_id]['occupied']:
+                # 空闲状态：需要更严格的条件才确认检测到人
+                if person_detected:
+                    # 额外验证：检查是否有足够大的连通区域
+                    if fg_mask is not None:
+                        # 查找连通区域
+                        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(fg_mask)
+                        # 检查是否有较大的连通区域
+                        large_components = 0
+                        for i in range(1, num_labels):  # 跳过背景
+                            if stats[i, cv2.CC_STAT_AREA] > fg_area_threshold:
+                                large_components += 1
+                        
+                        if large_components > 0:
+                            print("智能确认: 空闲状态下检测到人并通过连通区域验证，确认结果")
+                        else:
+                            # 没有足够大的连通区域，可能是背景噪声
+                            person_detected = False
+                            print("智能过滤: 检测到变化但未通过连通区域验证，可能是背景噪声，过滤误报")
             else:
-                # 作为最后的手段，如果以上都没检测到，但ROI中有明显变化，也强制认为检测到人
-                # 这是一个非常宽松的检测条件，用于极端情况
-                if roi_area > 0 and (fg_mask is not None and cv2.countNonZero(fg_mask) > 0) or len(all_contours) > 0:
-                    person_detected = True
-                    print("最终保障: 未通过其他检测方法，但存在变化，强制标记为检测到人")
-        else:
-            # 已占用状态，保持已有的检测结果
-            print("状态保持: 保持当前检测结果")
+                # 已占用状态：保持已有的检测结果，但增加离开确认
+                if not person_detected:
+                    # 连续多帧未检测到人才认为离开
+                    if hasattr(self, 'departure_counter') and seat_id in self.departure_counter:
+                        self.departure_counter[seat_id] += 1
+                    else:
+                        self.departure_counter = {seat_id: 1}
+                    
+                    # 需要连续3帧未检测到人才确认离开
+                    if self.departure_counter[seat_id] < 3:
+                        person_detected = True  # 暂时保持有人状态
+                        print(f"离开确认: 未检测到人但需连续确认 ({self.departure_counter[seat_id]}/3)")
+                    else:
+                        self.departure_counter[seat_id] = 0  # 重置计数器
+                        print("状态保持: 确认无人，保持当前检测结果")
+                else:
+                    # 检测到人，重置离开计数器
+                    if hasattr(self, 'departure_counter'):
+                        self.departure_counter[seat_id] = 0
         
         # 简化版：只检测是否有人，不进行人脸识别
         person_id = "有人" if person_detected else None

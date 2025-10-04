@@ -331,12 +331,13 @@ class SeatMonitor:
         min_area = self.config['detection']['motion_threshold']
         static_detection_enabled = self.config['detection'].get('static_detection_enabled', True)
         
-        # 计算ROI面积用于静态人体检测
+        # 计算ROI面积
         roi_area = w * h
         
         # 使用背景减除获取前景掩码
         motion_contours = []
         fg_mask = None
+        fg_area = 0
         if hasattr(self, 'back_sub') and self.back_sub is not None:
             self.log_message(f"座位{seat_id} - 背景减除器状态: 已初始化, 学习率: {self.bg_learning_rate}", "DEBUG")
             try:
@@ -352,9 +353,10 @@ class SeatMonitor:
                 fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel_close)
                 fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel_open)
                 
-                # 计算前景面积，帮助调试
+                # 计算前景面积
                 fg_area = cv2.countNonZero(fg_mask)
-                self.log_message(f"座位{seat_id} - 背景减除 - 前景面积: {fg_area}, ROI面积: {w*h}, 占比: {fg_area/(w*h)*100:.1f}%")
+                fg_ratio = fg_area / roi_area if roi_area > 0 else 0
+                self.log_message(f"座位{seat_id} - 背景减除 - 前景面积: {fg_area}, ROI面积: {w*h}, 占比: {fg_ratio*100:.1f}%")
                 
                 # 查找轮廓
                 motion_contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -369,9 +371,9 @@ class SeatMonitor:
             self.log_message(f"座位{seat_id} - 警告: 背景减除器不可用", "WARNING")
             motion_contours = []
 
-        # 静态特征检测（不依赖运动）
-        static_contours = []
+        # 静态特征检测（仅作为补充）
         static_area = 0
+        static_ratio = 0
         if static_detection_enabled:
             self.log_message(f"座位{seat_id} - 静态检测: 已启用", "DEBUG")
             # 转换为灰度图进行静态轮廓检测
@@ -389,47 +391,25 @@ class SeatMonitor:
             
             # 计算静态阈值面积
             static_area = cv2.countNonZero(thresh)
-            self.log_message(f"座位{seat_id} - 静态检测 - 阈值面积: {static_area}, 占比: {static_area/(w*h)*100:.1f}%")
-            
-            # 查找轮廓
-            static_contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            self.log_message(f"座位{seat_id} - 静态轮廓数量: {len(static_contours)}", "DEBUG")
+            static_ratio = static_area / roi_area if roi_area > 0 else 0
+            self.log_message(f"座位{seat_id} - 静态检测 - 阈值面积: {static_area}, 占比: {static_ratio*100:.1f}%")
         else:
             self.log_message(f"座位{seat_id} - 静态检测: 已禁用", "DEBUG")
         
-        # 合并运动和静态轮廓检测结果
-        all_contours = []
-        if motion_contours and len(motion_contours) > 0:
-            all_contours.extend(motion_contours)
-        if static_contours and len(static_contours) > 0:
-            all_contours.extend(static_contours)
+        # 设置合理的检测阈值
+        fg_area_threshold = w*h*0.02  # 前景检测阈值
+        static_area_threshold = w*h*0.10  # 提高静态检测阈值，减少误报
         
-        # 简化版检测逻辑 - 特别优化离开检测
+        # 获取当前座位状态
+        current_occupied = seat_id in self.occupancy_status and self.occupancy_status[seat_id]['occupied']
+        
+        # 简化检测逻辑，优先信任前景检测结果
         person_detected = False
         
-        # 计算ROI面积
-        roi_area = w * h
-        
-        # 设置合理的检测阈值
-        fg_area_threshold = w*h*0.02  # 适当提高阈值，减少离开后的误报
-        # 提高静态检测阈值，减少误报
-        static_area_threshold = w*h*0.08  # 从0.03提高到0.08，大幅减少静态检测的误判
-        
-        # 1. 检查前景掩码结果 - 主要用于检测人员离开
-        fg_area = 0
-        if fg_mask is not None:
-            fg_area = cv2.countNonZero(fg_mask)
-            self.log_message(f"座位{seat_id} - 前景面积: {fg_area}, 阈值: {fg_area_threshold}")
-            
-            # 只有当前景面积明显大于阈值时才认为有人
-            # 动态调整阈值：如果当前状态是已占用，则适当降低阈值以保持检测灵敏度
-            dynamic_threshold = fg_area_threshold
-            if seat_id in self.occupancy_status and self.occupancy_status[seat_id]['occupied']:
-                dynamic_threshold = fg_area_threshold * 0.7  # 已占用状态下降低30%阈值
-                self.log_message(f"座位{seat_id} - 已占用状态，动态调整阈值为: {dynamic_threshold}", "DEBUG")
-            
-            if fg_area > dynamic_threshold:
-                # 额外检查：确保有足够大的连通区域
+        # 1. 检查前景掩码结果 - 主要用于检测是否有人
+        if fg_area > fg_area_threshold:
+            # 额外检查：确保有足够大的连通区域
+            if fg_mask is not None:
                 num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(fg_mask)
                 large_components = 0
                 for i in range(1, num_labels):
@@ -439,35 +419,27 @@ class SeatMonitor:
                 if large_components > 0:
                     person_detected = True
                     self.log_message(f"座位{seat_id} - 前景检测: 检测到{large_components}个大连通区域，认为有人")
+        else:
+            self.log_message(f"座位{seat_id} - 前景检测: 前景面积小于阈值，认为无人")
+        
+        # 2. 静态检测仅在特殊情况下作为补充
+        # 已占用状态下，仅当静态面积非常大时才覆盖前景检测结果
+        if static_detection_enabled and not person_detected and current_occupied:
+            if static_ratio > 0.15:  # 静态面积占比大于15%才考虑
+                person_detected = True
+                self.log_message(f"座位{seat_id} - 静态检测: 静态面积占比{static_ratio*100:.1f}%大于15%，覆盖前景检测结果，认为有人")
             else:
-                self.log_message(f"座位{seat_id} - 前景检测: 前景面积小于阈值，认为无人")
+                self.log_message(f"座位{seat_id} - 静态检测: 静态面积小于阈值，已占用状态下优先信任前景检测结果，认为无人")
         
-        # 2. 静态检测作为补充，但不作为主要判断依据
-        # 优化：在已占用状态下，优先信任前景检测的结果，只有前景检测不确定时才使用静态检测
-        current_occupied = seat_id in self.occupancy_status and self.occupancy_status[seat_id]['occupied']
-        
-        if not person_detected and static_detection_enabled:
-            self.log_message(f"座位{seat_id} - 静态面积: {static_area}, 阈值: {static_area_threshold}")
-            
-            # 根据当前状态调整静态检测的权重
-            if current_occupied:
-                # 已占用状态下，静态检测更加严格，只有面积明显大于阈值才认为有人
-                # 并且前景检测已经认为无人的情况下，更加谨慎
-                if static_area > static_area_threshold * 1.5:  # 额外增加50%的阈值
-                    person_detected = True
-                    self.log_message(f"座位{seat_id} - 静态检测: 静态面积远大于阈值，确认有人")
-                else:
-                    self.log_message(f"座位{seat_id} - 静态检测: 静态面积小于阈值，已占用状态下优先信任前景检测结果，认为无人")
+        # 3. 空闲状态下，静态检测可以稍微宽松一些（防止遗漏检测）
+        elif static_detection_enabled and not person_detected and not current_occupied:
+            if static_ratio > static_area_threshold:
+                person_detected = True
+                self.log_message(f"座位{seat_id} - 静态检测: 静态面积大于阈值，空闲状态下认为有人")
             else:
-                # 空闲状态下，可以稍微宽松一些
-                if static_area > static_area_threshold:
-                    person_detected = True
-                    self.log_message(f"座位{seat_id} - 静态检测: 静态面积大于阈值，认为有人")
-                else:
-                    self.log_message(f"座位{seat_id} - 静态检测: 静态面积小于阈值，认为无人")
+                self.log_message(f"座位{seat_id} - 静态检测: 静态面积小于阈值，认为无人")
         
-        # 3. 智能确认模式：平衡误报和漏报
-        # 改进逻辑，避免将背景误判为人
+        # 4. 智能确认模式：平衡误报和漏报
         if seat_id in self.occupancy_status:
             if not self.occupancy_status[seat_id]['occupied']:
                 # 空闲状态：需要更严格的条件才确认检测到人
@@ -492,8 +464,8 @@ class SeatMonitor:
                 # 已占用状态：优化离开检测逻辑，强调前景检测结果
                 if not person_detected:
                     # 如果前景面积非常小，则优先认为人已离开
-                    if fg_area < fg_area_threshold * 0.3:  # 前景面积小于阈值的30%
-                        self.log_message(f"座位{seat_id} - 已占用状态下前景面积极小，强烈暗示人员已离开")
+                    if fg_ratio < 0.005:  # 前景面积小于0.5%
+                        self.log_message(f"座位{seat_id} - 已占用状态下前景面积极小({fg_ratio*100:.1f}%), 强烈暗示人员已离开，强制认为无人")
                     else:
                         self.log_message(f"座位{seat_id} - 已占用状态下未检测到人，将在update_occupancy_status中进行离开确认")
                 else:
@@ -565,7 +537,7 @@ class SeatMonitor:
                     
                     # 高学习率模式，帮助快速学习新的背景
                     if hasattr(self, 'back_sub') and self.back_sub is not None:
-                        self.bg_learning_rate = self.leave_detection_learning_rate  # 临时提高学习率
+                        self.bg_learning_rate = 0.05  # 临时提高学习率
                         self.log_message(f"座位{seat_id} - 临时提高学习率至: {self.bg_learning_rate}", "DEBUG")
             else:
                 # 未检测到人，增加离开计数器
@@ -582,17 +554,14 @@ class SeatMonitor:
                     roi_area = w * h
                     
                     # 增强型离开确认逻辑
-                    # 条件1: 离开计数器达到阈值（从3降低到2）
-                    # 条件2: 高学习率模式（帮助背景快速适应）
-                    # 条件3: 前景和静态面积都非常小（新增条件）
                     leave_confirmed = False
                     
                     # 检查离开计数器阈值
-                    if self.leave_counters[seat_id] >= 2:  # 阈值从3降低到2
+                    if self.leave_counters[seat_id] >= 2:  # 阈值设置为较低值，提高响应速度
                         self.log_message(f"座位{seat_id} - 离开计数器达到阈值: {self.leave_counters[seat_id]}", "INFO")
                         
-                        # 临时提高学习率到0.05（从0.03提高到0.05）
-                        self.bg_learning_rate = 0.05  # 提高临时高学习率
+                        # 临时提高学习率
+                        self.bg_learning_rate = 0.05
                         self.log_message(f"座位{seat_id} - 提高临时学习率至: {self.bg_learning_rate}", "DEBUG")
                         
                         # 重新提取ROI进行前景和静态面积检查
@@ -617,31 +586,20 @@ class SeatMonitor:
                             
                             self.log_message(f"座位{seat_id} - 离开确认 - 前景面积: {fg_area} ({fg_ratio*100:.1f}%), 静态面积: {static_area} ({static_ratio*100:.1f}%)")
                             
-                            # 条件3: 前景和静态面积都非常小
-                            # 新增条件：如果前景面积和静态面积都极小，则直接确认离开
-                            if fg_ratio < 0.01 and static_ratio < 0.01:
-                                self.log_message(f"座位{seat_id} - 前景和静态面积都极小，直接确认离开")
+                            # 简化的离开确认逻辑：
+                            # 1. 如果前景面积非常小，直接确认离开
+                            if fg_ratio < 0.005:  # 前景面积小于0.5%
+                                self.log_message(f"座位{seat_id} - 前景面积极小({fg_ratio*100:.1f}%), 强烈暗示人员已离开，强制确认离开")
                                 leave_confirmed = True
-                            # 增强条件：如果前景面积非常小，即使静态面积稍大，也优先确认离开
-                            elif fg_ratio < 0.005:  # 前景面积小于0.5%
-                                self.log_message(f"座位{seat_id} - 前景面积极小，强烈暗示人员已离开，确认离开")
+                            # 2. 或者离开计数器达到较高阈值，也确认离开
+                            elif self.leave_counters[seat_id] >= 5:
+                                self.log_message(f"座位{seat_id} - 离开计数器达到较高阈值，确认离开")
                                 leave_confirmed = True
                             else:
-                                self.log_message(f"座位{seat_id} - 前景和静态面积未达极小值，继续观察")
+                                self.log_message(f"座位{seat_id} - 未满足离开条件，继续观察")
                         else:
                             self.log_message(f"座位{seat_id} - ROI无效，无法计算前景和静态面积")
-                        
-                        # 如果未满足极小面积条件，仍根据离开计数器确认离开
-                        # 注意：已将阈值从3降低到2，同时添加了额外的面积检查，所以即使计数器达到2也需要额外确认
-                        if not leave_confirmed:
-                            # 进一步检查：如果连续2次都未检测到人，且每次前景面积都很小，则确认离开
-                            # 这里假设leave_counters记录的是连续未检测到人的次数
-                            if self.leave_counters[seat_id] >= 2:  # 保持较低阈值，但增加额外确认
-                                self.log_message(f"座位{seat_id} - 离开计数器达到阈值，且前景面积较小，确认离开")
-                                leave_confirmed = True
-                            else:
-                                self.log_message(f"座位{seat_id} - 离开计数器未达确认阈值，继续观察")
-                        
+                    
                     # 如果确认离开，更新状态并记录
                     if leave_confirmed:
                         # 记录结束时间和持续时间
@@ -657,12 +615,7 @@ class SeatMonitor:
                         })
                         
                         # 记录离开事件
-                        leave_reason = "离开计数器达到阈值" if self.leave_counters[seat_id] >= 2 else "其他原因"
-                        if fg_ratio < 0.01 and static_ratio < 0.01:
-                            leave_reason += " (前景和静态面积极小)"
-                        elif fg_ratio < 0.005:
-                            leave_reason += " (前景面积极小)"
-                        
+                        leave_reason = "前景面积极小" if fg_ratio < 0.005 else "离开计数器达到阈值"
                         self.log_message(f"座位{seat_id} - 状态变更: 已占用 -> 空闲, 持续时间: {duration:.2f}秒, 原因: {leave_reason}", "INFO")
                         
                         # 重置离开计数器
@@ -670,7 +623,7 @@ class SeatMonitor:
                         
                         # 保存记录
                         self.save_record(seat_id)
-        
+
         # 保存当前状态
         self.save_current_state()
         

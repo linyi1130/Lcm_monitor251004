@@ -29,26 +29,6 @@ if [ -d "$VENV_NAME" ]; then
     fi
 fi
 
-# 创建虚拟环境
-echo "正在创建虚拟环境 '$VENV_NAME'..."
-python3 -m venv "$VENV_NAME"
-
-# 激活虚拟环境
-source "$VENV_NAME/bin/activate"
-
-# 更新pip
-echo "更新pip..."
-pip install --upgrade pip
-
-# 安装项目依赖
-echo "安装项目依赖..."
-if [ -f "requirements.txt" ]; then
-    pip install -r requirements.txt
-else
-    echo "警告：未找到requirements.txt文件"
-    exit 1
-fi
-
 # 安装face_recognition的系统依赖（Raspberry Pi OS/Debian）
 echo "正在安装face_recognition所需的系统依赖..."
 # 检查是否是root用户
@@ -88,6 +68,26 @@ else
     echo "安装完成后，请验证cmake是否正确安装："
     echo "cmake --version"
     echo "如果找不到cmake命令，请检查是否将其添加到了PATH中"
+fi
+
+# 创建虚拟环境
+echo "正在创建虚拟环境 '$VENV_NAME'..."
+python3 -m venv "$VENV_NAME"
+
+# 激活虚拟环境
+source "$VENV_NAME/bin/activate"
+
+# 更新pip
+echo "更新pip..."
+pip install --upgrade pip
+
+# 安装项目依赖
+echo "安装项目依赖..."
+if [ -f "requirements.txt" ]; then
+    pip install -r requirements.txt
+else
+    echo "警告：未找到requirements.txt文件"
+    exit 1
 fi
 
 # 提示用户如何使用虚拟环境

@@ -49,6 +49,43 @@ chmod +x test_in_venv.sh
 1. 使用bash命令显式运行它，或者
 2. 为文件添加执行权限（使用chmod +x命令）
 
+## 关于libcap开发头文件的说明
+
+在构建某些Python包时，您可能会遇到以下错误：
+```
+You need to install libcap development headers to build this module
+```
+
+### 什么是libcap开发头文件？
+libcap是Linux系统中用于管理进程权限的库，某些Python包在构建过程中需要这些开发头文件。
+
+### 如何安装libcap开发头文件？
+
+**对于Debian/Ubuntu/Raspberry Pi OS：**
+```bash
+# 安装libcap开发头文件
+sudo apt-get update
+sudo apt-get install -y libcap-dev
+```
+
+**对于CentOS/RHEL：**
+```bash
+sudo yum install -y libcap-devel
+```
+
+**对于Fedora：**
+```bash
+sudo dnf install -y libcap-devel
+```
+
+**对于Arch Linux：**
+```bash
+sudo pacman -S libcap
+```
+
+### 已更新的安装脚本
+setup_venv.sh脚本和README.md文档已经更新，包含了libcap-dev包的安装命令，使用最新版本的脚本可以避免这个问题。
+
 ## 快速开始
 
 如果您想快速设置和运行座位监控系统，建议使用以下命令：

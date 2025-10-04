@@ -187,6 +187,64 @@ sudo apt-get install -y build-essential libopenblas-dev liblapack-dev libjpeg-de
    # 如果路径指向Python目录，删除它并重新安装官方版本
    ```
 
+## 关于libcamera依赖和Picamera2
+
+在运行座位监控系统时，您可能会遇到以下错误：
+```
+无法导入必要的模块 - No module named 'libcamera'
+```
+
+### 什么是libcamera以及为什么需要它？
+libcamera是Raspberry Pi OS上用于控制Camera Module 3的现代相机堆栈。座位监控系统使用Picamera2库来访问摄像头，而Picamera2又依赖于libcamera系统库。
+
+### 如何在Raspberry Pi OS上安装libcamera依赖？
+
+**对于Raspberry Pi OS的完整安装步骤：**
+
+```bash
+# 1. 更新包列表
+sudo apt-get update -y
+
+# 2. 安装libcamera相关系统依赖
+# 核心Python包
+sudo apt-get install -y python3-libcamera python3-kms++
+# 额外的支持包
+sudo apt-get install -y python3-pyqt5 python3-prctl libatlas-base-dev ffmpeg
+# 系统工具和开发库
+sudo apt-get install -y libcamera-apps libcamera-dev
+
+# 3. 验证libcamera安装
+echo "===== libcamera安装验证 ===="
+dpkg -l | grep libcamera
+echo "======================="
+```
+
+### 常见的libcamera相关问题及解决方案
+
+1. **问题：** 无法导入libcamera模块 - No module named 'libcamera'
+   **解决方案：** 这表示系统缺少Python的libcamera绑定。请运行以下命令安装所需包：
+   ```bash
+   sudo apt-get install -y python3-libcamera
+   ```
+
+2. **问题：** Picamera2初始化失败
+   **解决方案：** 确保您已启用摄像头接口并安装了所有必要的依赖：
+   ```bash
+   # 启用摄像头接口
+   sudo raspi-config nonint do_camera 0
+   # 安装所有libcamera依赖
+sudo apt-get install -y python3-libcamera python3-kms++ libcamera-apps libcamera-dev
+   ```
+
+3. **问题：** 在虚拟环境中无法使用libcamera
+   **解决方案：** libcamera通常是系统级Python包，可能需要在虚拟环境中创建符号链接：
+   ```bash
+   # 找到系统Python的libcamera包位置
+   find /usr/lib/python3* -name "libcamera"
+   # 在虚拟环境中创建符号链接
+   ln -s /usr/lib/python3.11/dist-packages/libcamera /path/to/your/venv/lib/python3.11/site-packages/
+   ```
+
 ## 快速开始
 
 如果您想快速设置和运行座位监控系统，建议使用以下命令：

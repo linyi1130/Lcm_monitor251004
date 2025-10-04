@@ -51,6 +51,12 @@ install_cmake_rpi() {
     echo "安装dlib构建所需的开发工具和库..."
     sudo apt-get install -y build-essential libopenblas-dev liblapack-dev libjpeg-dev zlib1g-dev libcap-dev
     
+    # 安装libcamera相关依赖（支持Picamera2）
+    echo "安装libcamera系统依赖（支持Picamera2）..."
+    sudo apt-get install -y python3-libcamera python3-kms++
+    sudo apt-get install -y python3-pyqt5 python3-prctl libatlas-base-dev ffmpeg python3-pip
+    sudo apt-get install -y libcamera-apps libcamera-dev
+    
     # 安装libtiff相关包
     echo "安装libtiff相关包..."
     sudo apt-get install -y libtiff5 || sudo apt-get install -y libtiff-dev || sudo apt-get install -y libtiff-tools

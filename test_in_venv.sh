@@ -32,6 +32,18 @@ if ! command -v cmake &> /dev/null; then
         read -r
     fi
     
+    # 检查libcamera依赖（Picamera2依赖）
+echo "检查libcamera依赖是否正确安装..."
+if ! python3 -c "import libcamera" &> /dev/null; then
+        echo "警告：libcamera模块未安装，这将导致Picamera2初始化失败"
+        echo "建议在继续前安装libcamera依赖："
+        echo "  sudo apt-get update"
+        echo "  sudo apt-get install -y python3-libcamera python3-kms++"
+        echo "  sudo apt-get install -y libcamera-apps libcamera-dev"
+        echo "按Enter键继续安装（可能会失败），或按Ctrl+C取消..."
+        read -r
+    fi
+    
     # 安装项目依赖（包括测试依赖）
 echo "安装项目依赖和测试依赖..."
 if [ -f "requirements.txt" ]; then

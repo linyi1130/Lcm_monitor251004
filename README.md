@@ -56,11 +56,20 @@
    # 5. 安装额外的开发工具
    sudo apt install -y python3-dev git libtiff5
    
-   # 6. 验证cmake安装
+   # 6. 安装libcamera系统依赖（支持Camera Module 3和Picamera2）
+   sudo apt install -y python3-libcamera python3-kms++ python3-pyqt5 python3-prctl libatlas-base-dev ffmpeg
+   sudo apt install -y libcamera-apps libcamera-dev
+   
+   # 7. 验证cmake安装
    echo "===== CMake安装验证 ===="
    cmake --version
    which cmake
    dpkg -l | grep cmake
+   echo "======================="
+   
+   # 8. 验证libcamera安装
+   echo "===== libcamera安装验证 ===="
+   dpkg -l | grep libcamera
    echo "======================="
    ```
    

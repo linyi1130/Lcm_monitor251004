@@ -60,13 +60,35 @@ def generate_test_image():
             print(f"已使用PIL创建测试图像: {SHARED_FRAME_PATH}")
             
         except ImportError:
-            # 如果PIL不可用，创建一个简单的JPEG文件
-            # 这里我们创建一个简单的文本文件，但后缀名为.jpg
-            # 这只是为了测试，实际使用时需要真正的图像
-            with open(SHARED_FRAME_PATH, 'w') as f:
-                f.write("这不是一个真正的图像文件，但用于测试路径是否正确。\n")
-                f.write(f"创建时间: {datetime.now().isoformat()}\n")
-            print(f"已创建测试文件（非图像）: {SHARED_FRAME_PATH}")
+            # 如果PIL不可用，尝试使用cv2创建图像
+            try:
+                import cv2
+                import numpy as np
+                
+                # 创建一个640x480的黑色图像
+                width, height = 640, 480
+                frame = np.zeros((height, width, 3), dtype=np.uint8)
+                
+                # 添加测试文字
+                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                cv2.putText(frame, "测试画面", (150, 150), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                cv2.putText(frame, current_time, (150, 200), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                cv2.putText(frame, "共享模式测试图像", (50, 250), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+                
+                # 保存为真正的JPEG图像
+                cv2.imwrite(SHARED_FRAME_PATH, frame)
+                print(f"已使用OpenCV创建测试图像: {SHARED_FRAME_PATH}")
+            except ImportError:
+                # 如果OpenCV也不可用，记录错误但不创建假图像文件
+                print("错误：PIL和OpenCV库都不可用，无法创建真正的图像文件。")
+                print("请安装PIL或OpenCV库以生成正确的测试图像。")
+                # 不创建假的JPEG文件，避免干扰seat_monitor.py的正常工作
+                if os.path.exists(SHARED_FRAME_PATH):
+                    os.remove(SHARED_FRAME_PATH)
+                    print(f"已删除旧的测试文件: {SHARED_FRAME_PATH}")
         
         # 验证文件是否存在
         if os.path.exists(SHARED_FRAME_PATH):

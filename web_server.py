@@ -75,6 +75,19 @@ class WebMonitorServer:
     def initialize_camera(self):
         """初始化摄像头或准备从已运行的监控系统获取画面"""
         try:
+            # 首先确保共享帧目录存在，无论哪种模式
+            self.shared_frame_dir = os.path.join(os.path.dirname(__file__), "shared_frames")
+            self.frame_file = os.path.join(self.shared_frame_dir, "current_frame.jpg")
+            
+            try:
+                if not os.path.exists(self.shared_frame_dir):
+                    os.makedirs(self.shared_frame_dir, exist_ok=True)
+                    logger.info(f"已创建共享帧目录: {self.shared_frame_dir}")
+                else:
+                    logger.info(f"共享帧目录已存在: {self.shared_frame_dir}")
+            except Exception as e:
+                logger.error(f"创建共享帧目录失败: {str(e)}")
+            
             # 尝试导入Picamera2（树莓派专用）
             try:
                 from picamera2 import Picamera2
@@ -98,11 +111,6 @@ class WebMonitorServer:
                     if "Device or resource busy" in str(e):
                         logger.warning("摄像头已被占用，将使用替代方式获取画面")
                         self.camera = None
-                        # 创建一个共享目录用于帧共享
-                        self.shared_frame_dir = os.path.join(os.path.dirname(__file__), "shared_frames")
-                        if not os.path.exists(self.shared_frame_dir):
-                            os.makedirs(self.shared_frame_dir)
-                        self.frame_file = os.path.join(self.shared_frame_dir, "current_frame.jpg")
                         # 设置为共享模式
                         self.frame_source = "shared"
                     else:
@@ -116,10 +124,6 @@ class WebMonitorServer:
                         # 摄像头被占用，切换到共享模式
                         logger.warning("摄像头已被占用，将使用替代方式获取画面")
                         self.camera = None
-                        self.shared_frame_dir = os.path.join(os.path.dirname(__file__), "shared_frames")
-                        if not os.path.exists(self.shared_frame_dir):
-                            os.makedirs(self.shared_frame_dir)
-                        self.frame_file = os.path.join(self.shared_frame_dir, "current_frame.jpg")
                         self.frame_source = "shared"
                     else:
                         # 设置分辨率
@@ -235,6 +239,19 @@ class WebMonitorServer:
     
     def generate_video_frames(self):
         """生成视频帧流，支持直接模式和共享模式"""
+        # 确保共享目录和文件路径已初始化
+        if not hasattr(self, 'shared_frame_dir'):
+            self.shared_frame_dir = os.path.join(os.path.dirname(__file__), "shared_frames")
+        if not hasattr(self, 'frame_file'):
+            self.frame_file = os.path.join(self.shared_frame_dir, "current_frame.jpg")
+            
+        # 再次检查并创建共享目录（确保）
+        try:
+            if not os.path.exists(self.shared_frame_dir):
+                os.makedirs(self.shared_frame_dir, exist_ok=True)
+        except Exception as e:
+            logger.error(f"创建共享帧目录失败: {str(e)}")
+        
         while True:
             # 根据不同的帧源获取帧
             if hasattr(self, 'frame_source') and self.frame_source == 'shared':

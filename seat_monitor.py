@@ -533,9 +533,9 @@ class SeatMonitor:
             # 优先使用树莓派5 texie系统常用中文字体
             font_path_candidates = [
                 # 树莓派/Linux系统常用中文字体（优先使用）
+                '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',  # 用户确认可用的字体，优先使用
                 '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
                 '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
-                '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
                 '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
                 '/usr/share/fonts/truetype/noto/NotoSerifCJK-Regular.ttc',
                 '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',

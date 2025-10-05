@@ -530,18 +530,15 @@ class SeatMonitor:
             draw = ImageDraw.Draw(pil_img)
             
             # 尝试加载中文字体，支持多种可能的字体路径和名称
+            # 优先使用系统已确认存在的中文字体
             font_path_candidates = [
-                # macOS 常用中文字体
-                '/System/Library/Fonts/PingFang.ttc',
-                '/System/Library/Fonts/SFNSMono.ttf',
-                '/System/Library/Fonts/STHeiti Medium.ttc',
-                '/System/Library/Fonts/Songti.ttc',
+                # 系统已确认存在的中文字体（优先使用）
+                '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
                 # Linux 常用中文字体
                 '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
                 '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
                 '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
                 '/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc',
-                '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
                 # Windows 常用中文字体
                 'C:/Windows/Fonts/simhei.ttf',
                 'C:/Windows/Fonts/simsun.ttc',
@@ -612,9 +609,11 @@ class SeatMonitor:
                     
                     # 使用PIL绘制中文文本和区域边界
                     if font:
+                        # 确保文本内容为Unicode字符串
+                        text = str(text)
                         # 绘制区域边界（使用PIL绘制多边形）
                         draw.polygon(tuple(map(tuple, region_points)), outline=color, width=2)
-                        # 绘制文本
+                        # 绘制文本，确保中文正常显示
                         draw.text((text_position[0], text_position[1] - 20), text, font=font, fill=color)
                         
                         # 如果座位被占用，显示占用时长和进入时间
@@ -623,6 +622,7 @@ class SeatMonitor:
                             minutes, seconds = divmod(int(duration), 60)
                             entry_time_str = status['entry_time'].strftime("%H:%M:%S")
                             duration_text = f"时长: {minutes}m{seconds}s | 进入: {entry_time_str}"
+                            duration_text = str(duration_text)  # 确保为Unicode字符串
                             duration_position = (text_position[0], text_position[1])
                             draw.text(duration_position, duration_text, font=font, fill=color)
                     else:
@@ -653,6 +653,9 @@ class SeatMonitor:
             
             # 使用PIL绘制中文文本
             if font:
+                # 确保文本内容为Unicode字符串
+                time_text = str(time_text)
+                status_text = str(status_text)
                 # 绘制时间和状态文本
                 draw.text((10, 10), time_text, font=font_large, fill=(255, 255, 255))
                 draw.text((10, 40), status_text, font=font_large, fill=(255, 255, 255))

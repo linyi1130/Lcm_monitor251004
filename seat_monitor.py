@@ -495,6 +495,60 @@ class SeatMonitor:
             self.log_message(f"区域检测出错: {str(e)}", "ERROR")
             return False
     
+    def draw_overlay(self, frame):
+        """在帧上绘制叠加层，显示座位状态信息"""
+        # 创建帧的副本，避免修改原始帧
+        display_frame = frame.copy()
+        
+        # 为每个座位区域绘制边界和状态信息
+        for seat in self.seat_regions:
+            seat_id = seat['id']
+            seat_name = seat['name']
+            region = seat['region']
+            
+            # 获取座位当前状态
+            status = self.occupancy_status[seat_id]
+            is_occupied = status['occupied']
+            
+            # 根据座位状态选择颜色
+            color = (0, 0, 255) if is_occupied else (0, 255, 0)  # 占用:红色, 空闲:绿色
+            
+            try:
+                # 绘制区域边界
+                region_points = np.array(region, dtype=np.int32)
+                cv2.polylines(display_frame, [region_points], True, color, 2)
+                
+                # 在区域左上角显示座位名称和状态
+                text_position = tuple(region_points[0])
+                text = f"{seat_name}: {'占用' if is_occupied else '空闲'}"
+                cv2.putText(display_frame, text, text_position, 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                
+                # 如果座位被占用，显示占用时长
+                if is_occupied and 'entry_time' in status:
+                    duration = (datetime.datetime.now() - status['entry_time']).total_seconds()
+                    minutes, seconds = divmod(int(duration), 60)
+                    duration_text = f"时长: {minutes}m{seconds}s"
+                    duration_position = (text_position[0], text_position[1] + 20)
+                    cv2.putText(display_frame, duration_text, duration_position, 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                
+            except Exception as e:
+                if self.debug_mode:
+                    self.log_message(f"绘制座位{seat_name}时出错: {str(e)}", "ERROR")
+        
+        # 在左上角显示当前时间
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cv2.putText(display_frame, current_time, (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        
+        # 显示系统状态
+        status_text = f"系统状态: 运行中 | FPS: {self.config['camera']['fps']}"
+        cv2.putText(display_frame, status_text, (10, 60), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        
+        return display_frame
+    
     def run(self):
         """运行监控系统"""
         try:

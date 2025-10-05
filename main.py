@@ -9,10 +9,16 @@
 import sys
 import os
 import time
+import argparse
 
 def main():
     """主入口函数"""
     try:
+        # 解析命令行参数
+        parser = argparse.ArgumentParser(description='座位监控系统')
+        parser.add_argument('-d', '--debug', action='store_true', help='启用调试模式，输出详细日志信息')
+        args = parser.parse_args()
+        
         # 确保当前工作目录包含seat_monitor模块
         current_dir = os.path.dirname(os.path.abspath(__file__))
         if current_dir not in sys.path:
@@ -25,10 +31,12 @@ def main():
         print("\n===== 座位监控系统 =====")
         print(f"启动时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"当前工作目录: {current_dir}")
+        if args.debug:
+            print("调试模式已启用")
         print("正在初始化系统...")
         
-        # 调用seat_monitor模块的main函数
-        exit_code = monitor_main()
+        # 调用seat_monitor模块的main函数，传递debug参数
+        exit_code = monitor_main(args.debug)
         
         # 返回退出码
         return exit_code

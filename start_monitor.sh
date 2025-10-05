@@ -12,7 +12,7 @@ VENV_NAME="seat_monitor_venv"
 if ! command -v python3 &> /dev/null
 then
     echo "Python 3 未安装，请先安装Python 3"
-    exit 1
+exit 1
 fi
 
 # 检查虚拟环境是否存在
@@ -66,7 +66,7 @@ if [ -f "requirements.txt" ]; then
         pip install -r requirements.txt
     else
         echo "错误：未找到requirements.txt文件"
-        exit 1
+exit 1
     fi
 fi
 
@@ -96,7 +96,12 @@ source "$VENV_NAME/bin/activate"
 
 # 运行程序
 echo "正在启动座位监控系统..."
-python main.py
+if [ "$1" = "-d" ] || [ "$1" = "--debug" ]; then
+    echo "调试模式已启用"
+    python main.py -d
+else
+    python main.py
+fi
 
 # 程序结束
 echo "座位监控系统已停止"

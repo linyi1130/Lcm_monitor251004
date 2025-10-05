@@ -20,9 +20,12 @@ import math
 from PIL import Image, ImageDraw, ImageFont
 
 class SeatMonitor:
-    def __init__(self, config_file='config.json'):
+    def __init__(self, config_file='config.json', debug=False):
         # 加载配置文件
         self.config = self.load_config(config_file)
+        
+        # 保存调试模式标志
+        self.debug_mode = debug
         
         # 初始化日志系统
         self.log_file = None
@@ -33,7 +36,7 @@ class SeatMonitor:
         self.camera = Picamera2()
         camera_config = self.camera.create_preview_configuration(
             main={"size": (self.config['camera']['resolution']['width'], 
-                          self.config['camera']['resolution']['height'])}
+                          self.config['camera']['resolution']['height'])} 
         )
         self.camera.configure(camera_config)
         self.camera.start()
@@ -101,7 +104,8 @@ class SeatMonitor:
         self.initialize_background_subtractor()
         
         print("座位监控系统已初始化 - 简化版")
-        self.log_message("座位监控系统已初始化 - 简化版，使用全屏监控区域", "INFO")
+        if self.debug_mode:
+            self.log_message("座位监控系统已初始化 - 简化版，使用全屏监控区域", "INFO")
     
     def load_config(self, config_file):
         """加载配置文件，修改为只返回一个座位的配置"""
@@ -220,12 +224,21 @@ class SeatMonitor:
             try:
                 timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
                 log_entry = f"[{timestamp}] [{level}] {message}\n"
-                # 输出到控制台
-                print(log_entry.strip())
-                # 写入日志文件
+                
+                # 只有在DEBUG模式下才输出DEBUG级别的日志到控制台
+                if level == "DEBUG":
+                    if self.debug_mode:
+                        print(log_entry.strip())
+                else:
+                    # 对于INFO、WARNING、ERROR等重要级别，始终输出到控制台
+                    if level in ["INFO", "WARNING", "ERROR"]:
+                        print(log_entry.strip())
+                
+                # 所有日志都写入文件
                 with open(self.log_file, 'a', encoding='utf-8') as f:
                     f.write(log_entry)
             except Exception as e:
+                # 确保错误信息始终显示在控制台
                 print(f"写入日志失败: {str(e)}")
         
     def initialize_monitor_region(self):
@@ -409,8 +422,9 @@ class SeatMonitor:
             if seat_id not in self.leave_counters:
                 self.leave_counters[seat_id] = 0
         
-        # 记录当前状态
-        self.log_message("开始更新座位占用状态...", "DEBUG")
+        # 只在DEBUG模式下记录此信息
+        if self.debug_mode:
+            self.log_message("开始更新座位占用状态...", "DEBUG")
         
         # 遍历所有座位区域（保持与draw_overlay方法一致的列表访问方式）
         for seat in self.seat_regions:
@@ -419,7 +433,10 @@ class SeatMonitor:
             
             # 获取当前状态
             current_occupied = self.occupancy_status.get(seat_id, {}).get('occupied', False)
-            self.log_message(f"座位{seat_id} - 当前状态: {'已占用' if current_occupied else '空闲'}", "DEBUG")
+            
+            # 只在DEBUG模式下记录此信息
+            if self.debug_mode:
+                self.log_message(f"座位{seat_id} - 当前状态: {'已占用' if current_occupied else '空闲'}", "DEBUG")
             
             # 检测区域内是否有人
             person_detected, person_id = self.detect_person_in_region(frame, region, seat_id)
@@ -442,7 +459,10 @@ class SeatMonitor:
             if person_detected:
                 # 重置离开计数器
                 self.leave_counters[seat_id] = 0
-                self.log_message(f"座位{seat_id} - 检测到人，重置离开计数器", "DEBUG")
+                
+                # 只在DEBUG模式下记录此信息
+                if self.debug_mode:
+                    self.log_message(f"座位{seat_id} - 检测到人，重置离开计数器", "DEBUG")
                 
                 # 如果之前是空闲状态，现在检测到人，更新状态
                 if not self.occupancy_status[seat_id]['occupied']:
@@ -452,16 +472,23 @@ class SeatMonitor:
                         'person_id': person_id,
                         'start_time': datetime.datetime.now()
                     })
+                    # 状态变更始终记录
                     self.log_message(f"座位{seat_id} - 状态变更: 空闲 -> 已占用", "INFO")
                     
                     # 高学习率模式，帮助快速学习新的背景
                     if hasattr(self, 'back_sub') and self.back_sub is not None:
                         self.bg_learning_rate = 0.05  # 临时提高学习率
-                        self.log_message(f"座位{seat_id} - 临时提高学习率至: {self.bg_learning_rate}", "DEBUG")
+                        
+                        # 只在DEBUG模式下记录此信息
+                        if self.debug_mode:
+                            self.log_message(f"座位{seat_id} - 临时提高学习率至: {self.bg_learning_rate}", "DEBUG")
             else:
                 # 未检测到人，增加离开计数器
                 self.leave_counters[seat_id] += 1
-                self.log_message(f"座位{seat_id} - 未检测到人，离开计数器: {self.leave_counters[seat_id]}")
+                
+                # 只在DEBUG模式下记录此信息
+                if self.debug_mode:
+                    self.log_message(f"座位{seat_id} - 未检测到人，离开计数器: {self.leave_counters[seat_id]}")
                 
                 # 如果当前是已占用状态，检查是否需要触发离开确认
                 if self.occupancy_status[seat_id]['occupied']:
@@ -479,6 +506,7 @@ class SeatMonitor:
                             'duration': duration
                         })
                         
+                        # 状态变更始终记录
                         self.log_message(f"座位{seat_id} - 状态变更: 已占用 -> 空闲, 持续时间: {duration:.2f}秒, 原因: 连续{self.leave_counters[seat_id]}帧未检测到人", "INFO")
                         
                         # 重置离开计数器
@@ -494,11 +522,15 @@ class SeatMonitor:
         if self.save_interval and (datetime.datetime.now() - self.last_save_time).seconds >= self.save_interval:
             self.save_current_state()
             self.last_save_time = datetime.datetime.now()
-            self.log_message(f"定期保存数据: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", "INFO")
+            # 只在DEBUG模式下记录此信息
+            if self.debug_mode:
+                self.log_message(f"定期保存数据: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", "INFO")
         
         # 生成每日报告
         if self.generate_daily_report(datetime.datetime.now()):
-            self.log_message("生成每日报告完成", "INFO")
+            # 只在DEBUG模式下记录此信息
+            if self.debug_mode:
+                self.log_message("生成每日报告完成", "INFO")
         
         # 返回当前的占用状态字典
         return self.occupancy_status
@@ -717,11 +749,11 @@ class SeatMonitor:
             
             print("座位监控系统已关闭")
 
-def main():
+def main(debug=False):
     """主函数，程序的入口点"""
     try:
-        # 创建座位监控实例
-        monitor = SeatMonitor()
+        # 创建座位监控实例，传递debug参数
+        monitor = SeatMonitor(debug=debug)
         # 运行监控系统
         monitor.run()
     except Exception as e:

@@ -397,8 +397,18 @@ class SeatMonitor:
             
             # 如果检测到有人
             if is_occupied:
-                # 如果之前是空闲状态，更新为占用状态
-                if not current_status['occupied']:
+                # 增加进入计数器
+                if not hasattr(self, 'enter_counters'):
+                    self.enter_counters = {s['id']: 0 for s in self.seat_regions}
+                self.enter_counters[seat_id] += 1
+                
+                # 重置离开计数器
+                self.leave_counters[seat_id] = 0
+                
+                # 如果之前是空闲状态，并且连续多帧检测到有人，才更新为占用状态
+                # 使用计数器来滤波，避免误报
+                # 连续3帧检测到有人才确认占用（约0.3秒）
+                if not current_status['occupied'] and self.enter_counters[seat_id] >= 3:
                     current_status['occupied'] = True
                     current_status['entry_time'] = current_time
                     current_status['person_id'] = f"person_{current_time.strftime('%Y%m%d%H%M%S')}_{seat_id}"
@@ -415,18 +425,18 @@ class SeatMonitor:
                         'person_id': current_status['person_id'],
                         'action': 'enter'
                     })
-                
-                # 重置离开计数器
-                self.leave_counters[seat_id] = 0
             else:
                 # 如果检测到无人
                 # 增加离开计数器
                 self.leave_counters[seat_id] += 1
                 
+                # 重置进入计数器
+                if hasattr(self, 'enter_counters'):
+                    self.enter_counters[seat_id] = 0
+                
                 # 如果连续多帧检测到无人，且当前状态为占用，则更新为空闲状态
-                # 使用计数器来滤波，避免误报
-                # 假设帧率为10fps，连续5帧表示0.5秒无人
-                if current_status['occupied'] and self.leave_counters[seat_id] >= 5:
+                # 增加阈值到10帧（约1秒）以减少误判
+                if current_status['occupied'] and self.leave_counters[seat_id] >= 10:
                     current_status['occupied'] = False
                     current_status['exit_time'] = current_time
                     
@@ -442,9 +452,18 @@ class SeatMonitor:
                                 record['duration_seconds'] = duration
                                 break
                         
-                        # 记录状态变更，添加时间标记
-                        timestamp_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
-                        self.log_message(f"[{timestamp_str}] {seat_name}状态变更: 已占用 -> 空闲, 持续时长: {int(duration)}秒", "INFO")
+                        # 添加最小持续时间检查，过滤掉短时间的误报
+                        if duration >= 3:  # 只有持续时间超过3秒才记录状态变更
+                            # 记录状态变更，添加时间标记
+                            timestamp_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
+                            self.log_message(f"[{timestamp_str}] {seat_name}状态变更: 已占用 -> 空闲, 持续时长: {int(duration)}秒", "INFO")
+                        else:
+                            # 短时间状态变更，静默修正
+                            if self.debug_mode:
+                                self.log_message(f"[{timestamp_str}] {seat_name}短暂状态修正: 忽略短时间占用({int(duration)}秒)", "DEBUG")
+                            # 移除错误的进入记录
+                            if self.records and self.records[-1]['action'] == 'enter' and self.records[-1]['person_id'] == current_status['person_id']:
+                                self.records.pop()
         
         # 定期保存数据
         if (current_time - self.last_save_time).total_seconds() >= self.save_interval:

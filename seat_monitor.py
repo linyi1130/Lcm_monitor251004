@@ -511,7 +511,7 @@ class SeatMonitor:
             is_occupied = foreground_area > adjusted_threshold
             
             if self.debug_mode:
-                self.log_message(f"区域检测: 前景面积={foreground_area}, 阈值={motion_threshold}, 结果={is_occupied}", "DEBUG")
+                self.log_message(f"区域检测: 前景面积={foreground_area}, 阈值={adjusted_threshold}, 结果={is_occupied}", "DEBUG")
             
             return is_occupied
         except Exception as e:

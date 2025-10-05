@@ -519,62 +519,111 @@ class SeatMonitor:
             return False
     
     def draw_overlay(self, frame):
-        """在帧上绘制叠加层，显示座位状态信息"""
+        """在帧上绘制叠加层，显示座位状态信息，支持中文显示"""
         # 创建帧的副本，避免修改原始帧
         display_frame = frame.copy()
         
-        # 为每个座位区域绘制边界和状态信息
-        for seat in self.seat_regions:
-            seat_id = seat['id']
-            seat_name = seat['name']
-            region = seat['region']
+        # 将OpenCV的BGR图像转换为PIL的RGB图像以支持中文显示
+        try:
+            # 创建PIL图像对象
+            pil_img = Image.fromarray(cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB))
+            draw = ImageDraw.Draw(pil_img)
             
-            # 获取座位当前状态
-            status = self.occupancy_status[seat_id]
-            is_occupied = status['occupied']
+            # 尝试加载中文字体，支持多种可能的字体路径
+            font_path_candidates = [
+                '/System/Library/Fonts/PingFang.ttc',  # macOS
+                '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',  # Linux
+                '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',  # Linux
+                'C:/Windows/Fonts/simhei.ttf'  # Windows
+            ]
             
-            # 根据座位状态选择颜色
-            color = (0, 0, 255) if is_occupied else (0, 255, 0)  # 占用:红色, 空闲:绿色
+            # 尝试加载字体，如果找不到则使用默认字体
+            font = None
+            for font_path in font_path_candidates:
+                try:
+                    if os.path.exists(font_path):
+                        font = ImageFont.truetype(font_path, 16)  # 普通文本字体大小
+                        font_large = ImageFont.truetype(font_path, 24)  # 较大文本字体大小
+                        break
+                except Exception:
+                    continue
             
-            try:
-                # 绘制区域边界
-                region_points = np.array(region, dtype=np.int32)
-                cv2.polylines(display_frame, [region_points], True, color, 2)
+            # 为每个座位区域绘制边界和状态信息
+            for seat in self.seat_regions:
+                seat_id = seat['id']
+                seat_name = seat['name']
+                region = seat['region']
                 
-                # 获取当前时间用于标记
-                seat_time = datetime.datetime.now().strftime("%H:%M:%S")
+                # 获取座位当前状态
+                status = self.occupancy_status[seat_id]
+                is_occupied = status['occupied']
                 
-                # 在区域左上角显示座位名称、状态和时间
-                text_position = tuple(region_points[0])
-                text = f"{seat_name}: {'占用' if is_occupied else '空闲'} [{seat_time}]"
-                cv2.putText(display_frame, text, text_position, 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                # 根据座位状态选择颜色 (BGR -> RGB for PIL)
+                color = (255, 0, 0) if is_occupied else (0, 255, 0)  # 占用:红色, 空闲:绿色
                 
-                # 如果座位被占用，显示占用时长和进入时间
-                if is_occupied and 'entry_time' in status:
-                    duration = (datetime.datetime.now() - status['entry_time']).total_seconds()
-                    minutes, seconds = divmod(int(duration), 60)
-                    entry_time_str = status['entry_time'].strftime("%H:%M:%S")
-                    duration_text = f"时长: {minutes}m{seconds}s | 进入: {entry_time_str}"
-                    duration_position = (text_position[0], text_position[1] + 20)
-                    cv2.putText(display_frame, duration_text, duration_position, 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                try:
+                    # 绘制区域边界 (仍使用OpenCV绘制)
+                    region_points = np.array(region, dtype=np.int32)
+                    cv2.polylines(display_frame, [region_points], True, (color[2], color[1], color[0]), 2)
+                    
+                    # 获取当前时间用于标记
+                    seat_time = datetime.datetime.now().strftime("%H:%M:%S")
+                    
+                    # 在区域左上角显示座位名称、状态和时间
+                    text_position = tuple(region_points[0])
+                    text = f"{seat_name}: {'占用' if is_occupied else '空闲'} [{seat_time}]"
+                    
+                    # 使用PIL绘制中文文本
+                    if font:
+                        draw.text((text_position[0], text_position[1] - 20), text, font=font, fill=color)
+                    else:
+                        # 如果无法加载字体，回退到OpenCV（可能仍显示乱码）
+                        cv2.putText(display_frame, text, text_position, 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (color[2], color[1], color[0]), 2)
+                    
+                    # 如果座位被占用，显示占用时长和进入时间
+                    if is_occupied and 'entry_time' in status:
+                        duration = (datetime.datetime.now() - status['entry_time']).total_seconds()
+                        minutes, seconds = divmod(int(duration), 60)
+                        entry_time_str = status['entry_time'].strftime("%H:%M:%S")
+                        duration_text = f"时长: {minutes}m{seconds}s | 进入: {entry_time_str}"
+                        duration_position = (text_position[0], text_position[1])
+                        
+                        # 使用PIL绘制中文文本
+                        if font:
+                            draw.text(duration_position, duration_text, font=font, fill=color)
+                        else:
+                            cv2.putText(display_frame, duration_text, duration_position, 
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (color[2], color[1], color[0]), 1)
+                    
+                except Exception as e:
+                    if self.debug_mode:
+                        self.log_message(f"绘制座位{seat_name}时出错: {str(e)}", "ERROR")
+            
+            # 获取当前时间并格式化
+            current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # 在左上角显示当前时间
+            time_text = f"时间: {current_time}"
+            status_text = f"[{current_time}] 系统状态: 运行中 | FPS: {self.config['camera']['framerate']}"
+            
+            # 使用PIL绘制中文文本
+            if font:
+                draw.text((10, 10), time_text, font=font_large, fill=(255, 255, 255))
+                draw.text((10, 40), status_text, font=font_large, fill=(255, 255, 255))
                 
-            except Exception as e:
-                if self.debug_mode:
-                    self.log_message(f"绘制座位{seat_name}时出错: {str(e)}", "ERROR")
-        
-        # 获取当前时间并格式化
-        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # 在左上角显示当前时间
-        cv2.putText(display_frame, f"时间: {current_time}", (10, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        
-        # 显示系统状态，包含时间标记
-        status_text = f"[{current_time}] 系统状态: 运行中 | FPS: {self.config['camera']['framerate']}"
-        cv2.putText(display_frame, status_text, (10, 60), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                # 将PIL图像转回OpenCV格式
+                display_frame = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+            else:
+                # 回退到OpenCV
+                cv2.putText(display_frame, time_text, (10, 30), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                cv2.putText(display_frame, status_text, (10, 60), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            
+        except Exception as e:
+            if self.debug_mode:
+                self.log_message(f"绘制叠加层时出错: {str(e)}", "ERROR")
         
         return display_frame
     

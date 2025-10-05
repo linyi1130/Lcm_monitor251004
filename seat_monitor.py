@@ -574,18 +574,18 @@ class SeatMonitor:
                         continue
             
             # 记录字体加载状态
-            if self.debug_mode:
-                if font:
+            if font:
+                if self.debug_mode:
                     self.log_message(f"成功加载字体: {loaded_font_path}", "INFO")
-                else:
-                    self.log_message("未能加载中文字体，将使用默认字体（可能显示乱码）", "WARNING")
-                    # 尝试使用PIL默认字体作为最后的备选
-                    try:
-                        font = ImageFont.load_default()
-                        font_large = ImageFont.load_default()
-                        self.log_message("已加载PIL默认字体", "INFO")
-                    except Exception:
-                        self.log_message("无法加载任何字体", "ERROR")
+            else:
+                self.log_message("未能加载中文字体，将使用默认字体（可能显示乱码）", "WARNING")
+                # 尝试使用PIL默认字体作为最后的备选
+                try:
+                    font = ImageFont.load_default()
+                    font_large = ImageFont.load_default()
+                    self.log_message("已加载PIL默认字体", "INFO")
+                except Exception:
+                    self.log_message("无法加载任何字体", "ERROR")
             
             # 为每个座位区域绘制边界和状态信息
             for seat in self.seat_regions:
@@ -643,8 +643,7 @@ class SeatMonitor:
                                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (color[2], color[1], color[0]), 1)
                     
                 except Exception as e:
-                    if self.debug_mode:
-                        self.log_message(f"绘制座位{seat_name}时出错: {str(e)}", "ERROR")
+                    self.log_message(f"绘制座位{seat_name}时出错: {str(e)}", "ERROR")
             
             # 获取当前时间并格式化
             current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -672,8 +671,7 @@ class SeatMonitor:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             
         except Exception as e:
-            if self.debug_mode:
-                self.log_message(f"绘制叠加层时出错: {str(e)}", "ERROR")
+            self.log_message(f"绘制叠加层时出错: {str(e)}", "ERROR")
         
         return display_frame
     

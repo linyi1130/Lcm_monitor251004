@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>监控图像调试页面</title>
+    <style>
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .image-container {
+            margin: 20px 0;
+            text-align: center;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: #fafafa;
+        }
+        .image-wrapper {
+            display: inline-block;
+            position: relative;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ccc;
+        }
+        .info-panel {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .info-item {
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .status-success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .status-warning {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .controls {
+            margin: 20px 0;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 8px 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button.stop {
+            background-color: #f44336;
+        }
+        button.stop:hover {
+            background-color: #d32f2f;
+        }
+        select, input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .logs {
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            background-color: #f5f5f5;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+        .error-message {
+            color: #f44336;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .loading {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 4px;
+        }
+        .image-wrapper.loading .loading {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>监控图像调试页面</h1>
+        
+        <div class="info-panel">
+            <div class="info-item">当前时间: <span id="current-time"></span></div>
+            <div class="info-item">图像状态: <span id="image-status" class="status status-warning">加载中...</span></div>
+            <div class="info-item">图像尺寸: <span id="image-size">未知</span></div>
+            <div class="info-item">更新频率: <span id="update-frequency">2 秒</span></div>
+        </div>
+        
+        <div class="controls">
+            <button id="refresh-btn">立即刷新图像</button>
+            <button id="start-auto-refresh">开始自动刷新</button>
+            <button id="stop-auto-refresh" class="stop" disabled>停止自动刷新</button>
+            <button id="generate-test-image">生成测试图像</button>
+            <div>
+                <label for="refresh-interval">刷新间隔(秒): </label>
+                <select id="refresh-interval">
+                    <option value="1">1</option>
+                    <option value="2" selected>2</option>
+                    <option value="5">5</option>
+                    <option value="10">10</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="image-container">
+            <div id="image-wrapper" class="image-wrapper">
+                <img id="monitor-image" src="" alt="监控图像加载中...">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+        
+        <div class="error-message" id="error-message"></div>
+        
+        <h3>调试日志</h3>
+        <div class="logs" id="logs"></div>
+    </div>
+
+    <script>
+        // 全局变量
+        let autoRefreshInterval = null;
+        let refreshRate = 2000; // 默认2秒
+        
+        // DOM 元素
+        const monitorImage = document.getElementById('monitor-image');
+        const imageWrapper = document.getElementById('image-wrapper');
+        const currentTimeEl = document.getElementById('current-time');
+        const imageStatusEl = document.getElementById('image-status');
+        const imageSizeEl = document.getElementById('image-size');
+        const updateFrequencyEl = document.getElementById('update-frequency');
+        const refreshBtn = document.getElementById('refresh-btn');
+        const startAutoRefreshBtn = document.getElementById('start-auto-refresh');
+        const stopAutoRefreshBtn = document.getElementById('stop-auto-refresh');
+        const generateTestImageBtn = document.getElementById('generate-test-image');
+        const refreshIntervalSelect = document.getElementById('refresh-interval');
+        const errorMessageEl = document.getElementById('error-message');
+        const logsEl = document.getElementById('logs');
+        
+        // 初始化页面
+        function initPage() {
+            log('页面已初始化');
+            updateCurrentTime();
+            setInterval(updateCurrentTime, 1000);
+            refreshImage();
+        }
+        
+        // 更新当前时间
+        function updateCurrentTime() {
+            const now = new Date();
+            currentTimeEl.textContent = now.toLocaleString('zh-CN');
+        }
+        
+        // 刷新图像
+        function refreshImage() {
+            log('开始刷新图像...');
+            showLoading(true);
+            hideError();
+            
+            // 使用时间戳避免浏览器缓存
+            const timestamp = new Date().getTime();
+            const imageUrl = `/static_image?t=${timestamp}`;
+            
+            // 创建新图像对象进行预加载
+            const tempImg = new Image();
+            
+            tempImg.onload = function() {
+                // 图像加载成功
+                monitorImage.src = imageUrl;
+                imageSizeEl.textContent = `${tempImg.width}x${tempImg.height}`;
+                updateStatus('success', '图像加载成功');
+                log(`图像加载成功: ${tempImg.width}x${tempImg.height}`);
+                showLoading(false);
+            };
+            
+            tempImg.onerror = function() {
+                // 图像加载失败
+                updateStatus('error', '无法加载图像');
+                log('错误: 无法加载图像');
+                showError('无法加载图像，请检查服务器状态');
+                showLoading(false);
+            };
+            
+            tempImg.src = imageUrl;
+        }
+        
+        // 生成测试图像
+        function generateTestImage() {
+            log('请求生成测试图像...');
+            showLoading(true);
+            hideError();
+            
+            fetch('/test_image')
+                .then(response => response.text())
+                .then(data => {
+                    log('测试图像生成完成');
+                    log(data);
+                    showLoading(false);
+                    // 延迟刷新图像，确保文件写入完成
+                    setTimeout(refreshImage, 500);
+                })
+                .catch(error => {
+                    log('生成测试图像时出错');
+                    showError('生成测试图像时出错: ' + error.message);
+                    showLoading(false);
+                });
+        }
+        
+        // 开始自动刷新
+        function startAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+            
+            refreshRate = parseInt(refreshIntervalSelect.value) * 1000;
+            autoRefreshInterval = setInterval(refreshImage, refreshRate);
+            
+            updateFrequencyEl.textContent = `${refreshRate/1000} 秒`;
+            startAutoRefreshBtn.disabled = true;
+            stopAutoRefreshBtn.disabled = false;
+            log(`已开始自动刷新，间隔: ${refreshRate/1000}秒`);
+        }
+        
+        // 停止自动刷新
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+            
+            startAutoRefreshBtn.disabled = false;
+            stopAutoRefreshBtn.disabled = true;
+            log('已停止自动刷新');
+        }
+        
+        // 更新状态
+        function updateStatus(type, message) {
+            imageStatusEl.textContent = message;
+            
+            // 移除所有状态类
+            imageStatusEl.classList.remove('status-success', 'status-error', 'status-warning');
+            
+            // 添加新状态类
+            if (type === 'success') {
+                imageStatusEl.classList.add('status-success');
+            } else if (type === 'error') {
+                imageStatusEl.classList.add('status-error');
+            } else {
+                imageStatusEl.classList.add('status-warning');
+            }
+        }
+        
+        // 显示加载状态
+        function showLoading(show) {
+            if (show) {
+                imageWrapper.classList.add('loading');
+            } else {
+                imageWrapper.classList.remove('loading');
+            }
+        }
+        
+        // 显示错误信息
+        function showError(message) {
+            errorMessageEl.textContent = message;
+            errorMessageEl.style.display = 'block';
+        }
+        
+        // 隐藏错误信息
+        function hideError() {
+            errorMessageEl.style.display = 'none';
+        }
+        
+        // 记录日志
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            logsEl.textContent += `[${timestamp}] ${message}\n`;
+            logsEl.scrollTop = logsEl.scrollHeight; // 滚动到最新日志
+        }
+        
+        // 注册事件监听器
+        function registerEventListeners() {
+            refreshBtn.addEventListener('click', refreshImage);
+            startAutoRefreshBtn.addEventListener('click', startAutoRefresh);
+            stopAutoRefreshBtn.addEventListener('click', stopAutoRefresh);
+            generateTestImageBtn.addEventListener('click', generateTestImage);
+            
+            // 当选择的刷新间隔改变时，更新自动刷新
+            refreshIntervalSelect.addEventListener('change', function() {
+                if (autoRefreshInterval) {
+                    startAutoRefresh();
+                }
+            });
+        }
+        
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            registerEventListeners();
+            initPage();
+        });
+    </script>
+</body>
+</html>

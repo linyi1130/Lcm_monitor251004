@@ -543,7 +543,7 @@ class SeatMonitor:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         
         # 显示系统状态
-        status_text = f"系统状态: 运行中 | FPS: {self.config['camera']['fps']}"
+        status_text = f"系统状态: 运行中 | FPS: {self.config['camera']['framerate']}"
         cv2.putText(display_frame, status_text, (10, 60), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         

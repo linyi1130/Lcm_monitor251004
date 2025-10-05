@@ -6,3 +6,4 @@ datetime
 matplotlib
 face_recognition
 pandas-stubs
+opencv-python

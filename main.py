@@ -11,6 +11,16 @@ import os
 import time
 import argparse
 
+# 创建一个简单的日志记录函数，用于替代print
+class SimpleLogger:
+    def __init__(self, debug=False):
+        self.debug = debug
+    
+    def log(self, message, error=False):
+        """记录日志信息，错误信息始终显示"""
+        if error or self.debug:
+            print(message)
+
 def main():
     """主入口函数"""
     try:
@@ -18,6 +28,9 @@ def main():
         parser = argparse.ArgumentParser(description='座位监控系统')
         parser.add_argument('-d', '--debug', action='store_true', help='启用调试模式，输出详细日志信息')
         args = parser.parse_args()
+        
+        # 创建简单日志记录器
+        logger = SimpleLogger(args.debug)
         
         # 确保当前工作目录包含seat_monitor模块
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -27,14 +40,6 @@ def main():
         # 导入座位监控模块
         from seat_monitor import main as monitor_main
         
-        # 打印启动信息
-        print("\n===== 座位监控系统 =====")
-        print(f"启动时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"当前工作目录: {current_dir}")
-        if args.debug:
-            print("调试模式已启用")
-        print("正在初始化系统...")
-        
         # 调用seat_monitor模块的main函数，传递debug参数
         exit_code = monitor_main(args.debug)
         
@@ -42,11 +47,12 @@ def main():
         return exit_code
         
     except ImportError as e:
-        print(f"错误: 无法导入必要的模块 - {str(e)}")
-        print("请确保seat_monitor.py文件存在于当前目录中")
+        error_msg = f"错误: 无法导入必要的模块 - {str(e)}"
+        print(error_msg)  # 错误信息始终显示
         return 1
     except Exception as e:
-        print(f"系统启动失败: {str(e)}")
+        error_msg = f"系统启动失败: {str(e)}"
+        print(error_msg)  # 错误信息始终显示
         import traceback
         traceback.print_exc()
         return 2

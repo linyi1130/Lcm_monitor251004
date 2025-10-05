@@ -13,9 +13,13 @@ import datetime
 import time
 import shutil
 from pathlib import Path
+import argparse
 
 class SeatMonitorTest:
-    def __init__(self):
+    def __init__(self, verbose=False):
+        # 控制输出详细程度的标志
+        self.verbose = verbose
+        
         # 检查项目文件是否齐全
         self.check_project_files()
         
@@ -23,7 +27,8 @@ class SeatMonitorTest:
         self.test_dir = "test_env"
         self.create_test_environment()
         
-        print("测试环境已准备就绪")
+        if self.verbose:
+            print("测试环境已准备就绪")
     
     def check_project_files(self):
         """检查项目必要文件是否存在"""
@@ -80,7 +85,8 @@ class SeatMonitorTest:
     
     def simulate_occupancy(self):
         """模拟座位占用情况"""
-        print("\n=== 模拟座位占用测试 ===")
+        if self.verbose:
+            print("\n=== 模拟座位占用测试 ===")
         
         # 模拟时间流逝和座位状态变化
         events = [
@@ -110,20 +116,25 @@ class SeatMonitorTest:
                 # 有人坐下
                 current_state[seat_id] = True
                 entry_times[seat_id] = current_dt
-                print(f"[{current_dt.time()}] 座位{seat_id}被{person_id}占用")
+                # 只在verbose模式下输出详细信息
+                if self.verbose:
+                    print(f"[{current_dt.time()}] 座位{seat_id}被{person_id}占用")
             elif not occupied and current_state[seat_id]:
                 # 人离开
                 current_state[seat_id] = False
                 exit_time = current_dt
                 duration = (exit_time - entry_times[seat_id]).total_seconds()
-                print(f"[{current_dt.time()}] 座位{seat_id}被释放，占用时长: {duration/60:.2f}分钟")
+                # 只在verbose模式下输出详细信息
+                if self.verbose:
+                    print(f"[{current_dt.time()}] 座位{seat_id}被释放，占用时长: {duration/60:.2f}分钟")
             
             # 模拟时间间隔
             time.sleep(0.5)
     
     def test_report_generation(self):
         """测试报告生成功能"""
-        print("\n=== 测试报告生成功能 ===")
+        if self.verbose:
+            print("\n=== 测试报告生成功能 ===")
         
         # 模拟生成报告
         today = datetime.date.today()
@@ -163,27 +174,30 @@ class SeatMonitorTest:
                     persons = row[('person_id', 'nunique')]
                     f.write(f"  {seat_name}: {count}次占用, {persons}人使用, 总时长{duration:.2f}小时\n")
             
-            print(f"测试报告已生成: {report_file}")
-            print(f"报告内容预览:\n")
-            
-            # 显示报告内容
-            with open(report_file, 'r', encoding='utf-8') as f:
-                print(f.read())
+            if self.verbose:
+                print(f"测试报告已生成: {report_file}")
+                print(f"报告内容预览:\n")
+                
+                # 显示报告内容
+                with open(report_file, 'r', encoding='utf-8') as f:
+                    print(f.read())
         except Exception as e:
             print(f"生成测试报告时出错: {str(e)}")
             print("请确保已安装pandas库: pip install pandas")
     
     def run_all_tests(self):
         """运行所有测试"""
-        print("开始运行系统测试...")
+        if self.verbose:
+            print("开始运行系统测试...")
         
         # 测试配置文件解析
         try:
             with open("config.json", 'r', encoding='utf-8') as f:
                 config = json.load(f)
-            print("\n=== 配置文件测试 ===")
-            print(f"成功解析配置文件，检测到 {len(config['seats'])} 个座位区域")
-            print(f"摄像头分辨率: {config['camera']['resolution']['width']}x{config['camera']['resolution']['height']}")
+            if self.verbose:
+                print("\n=== 配置文件测试 ===")
+                print(f"成功解析配置文件，检测到 {len(config['seats'])} 个座位区域")
+                print(f"摄像头分辨率: {config['camera']['resolution']['width']}x{config['camera']['resolution']['height']}")
         except Exception as e:
             print(f"配置文件测试失败: {str(e)}")
         
@@ -193,10 +207,16 @@ class SeatMonitorTest:
         # 测试报告生成
         self.test_report_generation()
         
-        print("\n=== 测试完成 ===")
-        print(f"测试数据保存在: {self.test_dir}")
-        print("提示：在实际部署时，请确保Camera Module 3已正确连接并启用")
+        if self.verbose:
+            print("\n=== 测试完成 ===")
+            print(f"测试数据保存在: {self.test_dir}")
+            print("提示：在实际部署时，请确保Camera Module 3已正确连接并启用")
 
 if __name__ == "__main__":
-    tester = SeatMonitorTest()
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(description='座位监控系统测试脚本')
+    parser.add_argument('-v', '--verbose', action='store_true', help='启用详细输出模式')
+    args = parser.parse_args()
+    
+    tester = SeatMonitorTest(verbose=args.verbose)
     tester.run_all_tests()

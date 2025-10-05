@@ -32,7 +32,6 @@ class SeatMonitor:
         self.initialize_logging()
         
         # 初始化摄像头
-        print("初始化摄像头...")
         self.camera = Picamera2()
         camera_config = self.camera.create_preview_configuration(
             main={"size": (self.config['camera']['resolution']['width'], 
@@ -42,7 +41,6 @@ class SeatMonitor:
         self.camera.start()
         if self.config['camera']['rotation'] != 0:
             self.camera.rotation = self.config['camera']['rotation']
-        print(f"摄像头已启动，分辨率: {self.config['camera']['resolution']['width']}x{self.config['camera']['resolution']['height']}")
         
         # 设置座位区域 - 直接使用配置文件中的区域
         self.seat_regions = []
@@ -55,7 +53,6 @@ class SeatMonitor:
                 "name": self.config['seats'][0]['name'],
                 "region": self.config['seats'][0]['region']
             })
-            print(f"已加载配置文件中的监控区域，大小: {self.config['camera']['resolution']['width']}x{self.config['camera']['resolution']['height']}")
             self.log_message(f"已加载配置文件中的监控区域，大小: {self.config['camera']['resolution']['width']}x{self.config['camera']['resolution']['height']}", "INFO")
         else:
             # 如果没有定义，使用默认的全屏区域
@@ -70,7 +67,6 @@ class SeatMonitor:
                 "name": "默认监控区域",
                 "region": default_region
             })
-            print("未在配置文件中找到区域定义，使用默认的全屏监控区域")
             self.log_message("未在配置文件中找到区域定义，使用默认的全屏监控区域", "INFO")
         
         # 人员状态跟踪
@@ -103,7 +99,6 @@ class SeatMonitor:
         # 初始化背景减除器，用于改进人员检测
         self.initialize_background_subtractor()
         
-        print("座位监控系统已初始化 - 简化版")
         if self.debug_mode:
             self.log_message("座位监控系统已初始化 - 简化版，使用全屏监控区域", "INFO")
     
@@ -117,7 +112,7 @@ class SeatMonitor:
                     config['seats'] = [config['seats'][0]]
                 return config
         except Exception as e:
-            print(f"加载配置文件失败: {str(e)}")
+            self.log_message(f"加载配置文件失败: {str(e)}", "ERROR")
             # 返回默认配置（只有一个座位）
             return {
                 "camera": {
@@ -159,11 +154,10 @@ class SeatMonitor:
             }
             # 初始化离开计数器
             self.leave_counters[seat['id']] = 0
-            print(f"初始化座位{seat['id']}状态: 空闲")  # 调试信息
     
     def load_known_faces(self):
         """简化版：不需要加载已知人脸数据"""
-        print("使用简化版检测模式，不加载已知人脸数据")
+        self.log_message("使用简化版检测模式，不加载已知人脸数据", "INFO")
         pass
         
     def initialize_background_subtractor(self):
@@ -192,14 +186,12 @@ class SeatMonitor:
             # 设置学习率，使用较高的学习率以加快背景适应
             self.bg_learning_rate = 0.01  # 适中的学习率，平衡敏感性和稳定性
             
-            print(f"背景减除器初始化成功（简化版）: 历史帧={history}, 方差阈值={var_threshold}, 学习率={self.bg_learning_rate}")
-            self.log_message(f"背景减除器初始化成功: 历史帧={history}, 方差阈值={var_threshold}, 学习率={self.bg_learning_rate}")
+            self.log_message(f"背景减除器初始化成功: 历史帧={history}, 方差阈值={var_threshold}, 学习率={self.bg_learning_rate}", "INFO")
         except Exception as e:
             error_msg = f"初始化背景减除器失败: {str(e)}"
-            print(error_msg)
-            self.log_message(error_msg)
+            self.log_message(error_msg, "ERROR")
             self.back_sub = None
-            
+    
     def initialize_logging(self):
         """初始化日志系统"""
         try:
@@ -209,13 +201,12 @@ class SeatMonitor:
             
             current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             self.log_file = os.path.join(log_dir, f"seat_monitor_{current_time}.log")
-            print(f"日志文件已创建: {self.log_file}")
             
             # 写入日志头部
             with open(self.log_file, 'a', encoding='utf-8') as f:
                 f.write(f"===== 座位监控系统日志 - {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} =====\n")
         except Exception as e:
-            print(f"初始化日志系统失败: {str(e)}")
+            self.log_message(f"初始化日志系统失败: {str(e)}", "ERROR")
             self.log_file = None
             
     def log_message(self, message, level="INFO"):
@@ -225,14 +216,15 @@ class SeatMonitor:
                 timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
                 log_entry = f"[{timestamp}] [{level}] {message}\n"
                 
-                # 只有在DEBUG模式下才输出DEBUG级别的日志到控制台
-                if level == "DEBUG":
-                    if self.debug_mode:
-                        print(log_entry.strip())
-                else:
-                    # 对于INFO、WARNING、ERROR等重要级别，始终输出到控制台
-                    if level in ["INFO", "WARNING", "ERROR"]:
-                        print(log_entry.strip())
+                # 只有在状态变更时才输出到控制台
+                # 检查消息是否包含状态变更相关内容
+                if "状态变更" in message:
+                    # 直接打印简单的状态变更信息，不包含时间戳和日志级别
+                    # 提取状态变更的核心信息
+                    if "空闲 -> 已占用" in message:
+                        print(f"{message}")
+                    elif "已占用 -> 空闲" in message:
+                        print(f"{message}")
                 
                 # 所有日志都写入文件
                 with open(self.log_file, 'a', encoding='utf-8') as f:
@@ -240,7 +232,7 @@ class SeatMonitor:
             except Exception as e:
                 # 确保错误信息始终显示在控制台
                 print(f"写入日志失败: {str(e)}")
-        
+    
     def initialize_monitor_region(self):
         """Interactive monitor region initialization, user selects four points with mouse"""
         # Create window
@@ -261,9 +253,8 @@ class SeatMonitor:
             if event == cv2.EVENT_LBUTTONDOWN:
                 if len(points) < 4:
                     points.append((x, y))
-                    print(f"Selected point {len(points)}: ({x}, {y})")
                     if len(points) == 4:
-                        print("Four points selected, monitor region defined")
+                        pass  # 静默选择
             elif event == cv2.EVENT_MOUSEMOVE:
                 temp_point = (x, y)
         
@@ -283,13 +274,7 @@ class SeatMonitor:
                 cv2.putText(frame, f"{i+1}", (x+10, y-10), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
             
-            # When displaying frame for the first time, show instructions
-            if not instructions_shown:
-                print("Instructions:")
-                print("1. Click four points in the camera view to define the monitor region")
-                print("2. Click in clockwise or counter-clockwise order")
-                print("3. Press any key to continue after selecting four points")
-                instructions_shown = True
+            # 静默模式下不显示指令
             
             # 如果已有点，绘制连线
             if len(points) > 1:
@@ -312,7 +297,6 @@ class SeatMonitor:
             key = cv2.waitKey(1) & 0xFF
             if key == 27:  # ESC键
                 points = []
-                print("已取消所有选择的点，请重新选择")
             elif key != 255 and len(points) == 4:
                 break
         
@@ -326,214 +310,9 @@ class SeatMonitor:
         try:
             with open(config_file, 'w', encoding='utf-8') as f:
                 json.dump(self.config, f, ensure_ascii=False, indent=2)
-            print(f"配置已保存到 {config_file}")
+            self.log_message(f"配置已保存到 {config_file}", "INFO")
         except Exception as e:
-            print(f"保存配置文件失败: {str(e)}")
-    
-    def detect_person_in_region(self, frame, region, seat_id=None):
-        """检测指定区域内是否有人"""
-        if frame is None or region is None:
-            self.log_message("检测失败：无效的帧或区域", "ERROR")
-            return False, None
-        
-        # 创建区域掩码
-        mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-        pts = np.array(region, np.int32)
-        cv2.fillPoly(mask, [pts], 255)
-        
-        # 计算区域的最小包围矩形以提取ROI
-        x = min([p[0] for p in region])
-        y = min([p[1] for p in region])
-        w = max([p[0] for p in region]) - x
-        h = max([p[1] for p in region]) - y
-        
-        # 检查ROI是否有效
-        if w <= 0 or h <= 0:
-            self.log_message("无效的ROI尺寸", "ERROR")
-            return False, None
-        
-        # 确保ROI不超出帧边界
-        x = max(0, x)
-        y = max(0, y)
-        w = min(w, frame.shape[1] - x)
-        h = min(h, frame.shape[0] - y)
-        
-        # 提取ROI
-        roi = frame[y:y+h, x:x+w].copy()
-        if roi is None or roi.size == 0:
-            self.log_message("无法提取有效的ROI", "ERROR")
-            return False, None
-        
-        # 应用区域掩码
-        roi_mask = mask[y:y+h, x:x+w]
-        if roi_mask.shape[:2] != roi.shape[:2]:
-            roi_mask = cv2.resize(roi_mask, (roi.shape[1], roi.shape[0]))
-        
-        # 初始化背景减法器（如果尚未初始化）
-        if not hasattr(self, 'back_sub') or self.back_sub is None:
-            self.back_sub = cv2.createBackgroundSubtractorMOG2(history=300, varThreshold=10, detectShadows=False)
-            self.log_message("背景减法器已初始化", "DEBUG")
-        
-        # 获取当前学习率（默认或从配置读取）
-        learning_rate = getattr(self, 'bg_learning_rate', 0.01)
-        
-        # 应用背景减法获取前景掩码
-        fg_mask = self.back_sub.apply(roi, learningRate=learning_rate)
-        
-        # 应用区域掩码到前景掩码
-        fg_mask = cv2.bitwise_and(fg_mask, roi_mask)
-        
-        # 阈值化处理，去除阴影
-        _, fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
-        
-        # 计算前景面积
-        fg_area = cv2.countNonZero(fg_mask)
-        
-        # 计算区域总面积
-        roi_area = w * h
-        
-        # 计算前景面积占比
-        fg_ratio = fg_area / roi_area if roi_area > 0 else 0
-        
-        # 简单的运动检测逻辑：如果前景面积超过阈值，则认为有人
-        # 由于使用整个画面，我们使用相对较小的阈值（1%）
-        motion_threshold = 0.01  # 面积占比阈值
-        
-        # 判断是否检测到人
-        person_detected = fg_ratio > motion_threshold
-        
-        # 日志记录
-        self.log_message(f"区域检测 - 前景面积: {fg_area} ({fg_ratio*100:.2f}%), 阈值: {motion_threshold*100:.2f}%, 检测结果: {'有人' if person_detected else '无人'}", "DEBUG")
-        
-        # 对于简化版本，不进行人脸识别或跟踪
-        person_id = None
-        
-        return person_detected, person_id
-    
-    def update_occupancy_status(self, frame):
-        """更新座位占用状态"""
-        # 初始化离开计数器（如果不存在）
-        if not hasattr(self, 'leave_counters'):
-            self.leave_counters = {}
-        
-        # 为每个座位更新离开计数器
-        for seat in self.seat_regions:
-            seat_id = seat['id']
-            if seat_id not in self.leave_counters:
-                self.leave_counters[seat_id] = 0
-        
-        # 只在DEBUG模式下记录此信息
-        if self.debug_mode:
-            self.log_message("开始更新座位占用状态...", "DEBUG")
-        
-        # 遍历所有座位区域（保持与draw_overlay方法一致的列表访问方式）
-        for seat in self.seat_regions:
-            seat_id = seat['id']
-            region = seat['region']
-            
-            # 获取当前状态
-            current_occupied = self.occupancy_status.get(seat_id, {}).get('occupied', False)
-            
-            # 只在DEBUG模式下记录此信息
-            if self.debug_mode:
-                self.log_message(f"座位{seat_id} - 当前状态: {'已占用' if current_occupied else '空闲'}", "DEBUG")
-            
-            # 检测区域内是否有人
-            person_detected, person_id = self.detect_person_in_region(frame, region, seat_id)
-            
-            # 初始化座位状态（如果不存在）
-            if seat_id not in self.occupancy_status:
-                self.occupancy_status[seat_id] = {
-                    'occupied': False,
-                    'person_id': None,
-                    'start_time': None,
-                    'end_time': None,
-                    'duration': 0
-                }
-            
-            # 初始化离开计数器
-            if seat_id not in self.leave_counters:
-                self.leave_counters[seat_id] = 0
-            
-            # 处理检测结果
-            if person_detected:
-                # 重置离开计数器
-                self.leave_counters[seat_id] = 0
-                
-                # 只在DEBUG模式下记录此信息
-                if self.debug_mode:
-                    self.log_message(f"座位{seat_id} - 检测到人，重置离开计数器", "DEBUG")
-                
-                # 如果之前是空闲状态，现在检测到人，更新状态
-                if not self.occupancy_status[seat_id]['occupied']:
-                    # 开始新的占用记录
-                    self.occupancy_status[seat_id].update({
-                        'occupied': True,
-                        'person_id': person_id,
-                        'start_time': datetime.datetime.now()
-                    })
-                    # 状态变更始终记录
-                    self.log_message(f"座位{seat_id} - 状态变更: 空闲 -> 已占用", "INFO")
-                    
-                    # 高学习率模式，帮助快速学习新的背景
-                    if hasattr(self, 'back_sub') and self.back_sub is not None:
-                        self.bg_learning_rate = 0.05  # 临时提高学习率
-                        
-                        # 只在DEBUG模式下记录此信息
-                        if self.debug_mode:
-                            self.log_message(f"座位{seat_id} - 临时提高学习率至: {self.bg_learning_rate}", "DEBUG")
-            else:
-                # 未检测到人，增加离开计数器
-                self.leave_counters[seat_id] += 1
-                
-                # 只在DEBUG模式下记录此信息
-                if self.debug_mode:
-                    self.log_message(f"座位{seat_id} - 未检测到人，离开计数器: {self.leave_counters[seat_id]}")
-                
-                # 如果当前是已占用状态，检查是否需要触发离开确认
-                if self.occupancy_status[seat_id]['occupied']:
-                    # 简化的离开确认逻辑：只要连续未检测到人达到阈值，就确认离开
-                    if self.leave_counters[seat_id] >= 3:  # 适中的阈值，平衡误报和响应速度
-                        # 记录结束时间和持续时间
-                        end_time = datetime.datetime.now()
-                        start_time = self.occupancy_status[seat_id]['start_time']
-                        duration = (end_time - start_time).total_seconds() if start_time else 0
-                        
-                        # 更新状态
-                        self.occupancy_status[seat_id].update({
-                            'occupied': False,
-                            'end_time': end_time,
-                            'duration': duration
-                        })
-                        
-                        # 状态变更始终记录
-                        self.log_message(f"座位{seat_id} - 状态变更: 已占用 -> 空闲, 持续时间: {duration:.2f}秒, 原因: 连续{self.leave_counters[seat_id]}帧未检测到人", "INFO")
-                        
-                        # 重置离开计数器
-                        self.leave_counters[seat_id] = 0
-                        
-                        # 保存记录
-                        self.save_record(seat_id)
-
-        # 保存当前状态
-        self.save_current_state()
-        
-        # 定期保存数据
-        if self.save_interval and (datetime.datetime.now() - self.last_save_time).seconds >= self.save_interval:
-            self.save_current_state()
-            self.last_save_time = datetime.datetime.now()
-            # 只在DEBUG模式下记录此信息
-            if self.debug_mode:
-                self.log_message(f"定期保存数据: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", "INFO")
-        
-        # 生成每日报告
-        if self.generate_daily_report(datetime.datetime.now()):
-            # 只在DEBUG模式下记录此信息
-            if self.debug_mode:
-                self.log_message("生成每日报告完成", "INFO")
-        
-        # 返回当前的占用状态字典
-        return self.occupancy_status
+            self.log_message(f"保存配置文件失败: {str(e)}", "ERROR")
     
     def save_current_state(self):
         """定期保存当前状态，防止数据丢失"""
@@ -552,21 +331,9 @@ class SeatMonitor:
             with open(state_filename, 'w', encoding='utf-8') as f:
                 json.dump(state_data, f, ensure_ascii=False, indent=2, default=str)
             
-            print(f"[{current_time}] 系统状态已保存")
+            self.log_message(f"系统状态已保存", "INFO")
         except Exception as e:
-            print(f"保存系统状态时出错: {str(e)}")
-    
-    def save_record(self, record):
-        """保存单条记录到CSV文件"""
-        today = datetime.date.today()
-        filename = os.path.join(self.data_dir, f"occupancy_records_{today.strftime('%Y%m%d')}.csv")
-        
-        # 检查文件是否存在
-        file_exists = os.path.isfile(filename)
-        
-        # 创建DataFrame并保存
-        df = pd.DataFrame([record])
-        df.to_csv(filename, mode='a', header=not file_exists, index=False)
+            self.log_message(f"保存系统状态时出错: {str(e)}", "ERROR")
     
     def generate_daily_report(self, date):
         """生成每日监控报告"""
@@ -574,7 +341,7 @@ class SeatMonitor:
         report_filename = os.path.join(self.reports_dir, f"daily_report_{date.strftime('%Y%m%d')}.txt")
         
         if not os.path.isfile(filename):
-            print(f"没有找到{date}的数据文件，无法生成报告")
+            self.log_message(f"没有找到{date}的数据文件，无法生成报告", "INFO")
             return
         
         try:
@@ -607,69 +374,13 @@ class SeatMonitor:
                     persons = row[('person_id', 'nunique')]
                     f.write(f"  {seat_name}: {count}次占用, {persons}人使用, 总时长{duration:.2f}小时\n")
                 
-            print(f"已生成{date}的每日报告: {report_filename}")
+            self.log_message(f"已生成{date}的每日报告: {report_filename}", "INFO")
         except Exception as e:
-            print(f"生成报告时出错: {str(e)}")
-    
-    def draw_overlay(self, frame):
-        """Draw seat regions and status on video frame"""
-        # 创建调试信息区域
-        debug_frame = frame.copy()
-        
-        for seat in self.seat_regions:
-            seat_id = seat['id']
-            region = seat['region']
-            status = self.occupancy_status[seat_id]
-            
-            # Set color based on occupancy status
-            color = (0, 0, 255) if status['occupied'] else (0, 255, 0)
-            thickness = 2 if status['occupied'] else 1
-            
-            # Draw region
-            cv2.polylines(debug_frame, [np.array(region)], True, color, thickness)
-            
-            # Display seat name and status (using English to avoid display issues)
-            status_text = "Occupied" if status['occupied'] else "Empty"
-            text = f"{seat['name']}: {status_text}"
-            if status['occupied'] and status['person_id']:
-                text += f" ({status['person_id']})"
-            
-            # Draw text using OpenCV with English
-            cv2.putText(debug_frame, text, (region[0][0], region[0][1] - 10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-            
-            # 添加离开计数器信息
-            counter_text = f"Leave: {self.leave_counters[seat_id]}"
-            cv2.putText(debug_frame, counter_text, (region[0][0], region[-1][1] + 20), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
-        
-        # Display current time
-        current_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cv2.putText(debug_frame, current_time_str, (10, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-        
-        # 显示前景掩码（如果可用）
-        if hasattr(self, 'debug_fg_mask') and self.debug_fg_mask is not None:
-            # 调整前景掩码大小以适应显示
-            mask_h, mask_w = self.debug_fg_mask.shape
-            # 创建彩色版本的掩码便于查看
-            color_mask = cv2.cvtColor(self.debug_fg_mask, cv2.COLOR_GRAY2BGR)
-            # 在主画面上叠加前景掩码
-            overlay_h, overlay_w = min(200, mask_h), min(200, mask_w)
-            small_mask = cv2.resize(color_mask, (overlay_w, overlay_h))
-            # 将掩码叠加在右上角
-            if overlay_h < debug_frame.shape[0] and overlay_w < debug_frame.shape[1]:
-                debug_frame[10:10+overlay_h, debug_frame.shape[1]-overlay_w-10:debug_frame.shape[1]-10] = small_mask
-                cv2.putText(debug_frame, "FG Mask", (debug_frame.shape[1]-overlay_w-10, 30), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-        
-        return debug_frame
+            self.log_message(f"生成报告时出错: {str(e)}", "ERROR")
     
     def run(self):
         """运行监控系统"""
         try:
-            print("座位监控系统已启动，按'q'键退出")
-            print("当前模式：简化版 - 持续显示摄像头内容，检测是否有人")
             self.log_message("座位监控系统已启动，按'q'键退出", "INFO")
             
             # 初始化显示窗口
@@ -714,22 +425,18 @@ class SeatMonitor:
                     last_frame_time = current_time
                 except Exception as e:
                     error_msg = f"处理帧时出错: {str(e)}"
-                    print(error_msg)
                     self.log_message(error_msg, "ERROR")
                     time.sleep(0.5)  # 出错时稍作暂停再继续
         
         except KeyboardInterrupt:
-            print("系统被用户中断")
             self.log_message("系统被用户中断", "INFO")
         finally:
             # 清理资源
             try:
                 self.camera.stop()
                 cv2.destroyAllWindows()
-                print("摄像头已关闭，窗口已销毁")
                 self.log_message("摄像头已关闭，窗口已销毁", "INFO")
             except Exception as e:
-                print(f"清理资源时出错: {str(e)}")
                 self.log_message(f"清理资源时出错: {str(e)}", "ERROR")
             
             try:
@@ -737,7 +444,6 @@ class SeatMonitor:
                 self.save_current_state()
                 self.log_message("最后保存当前状态", "INFO")
             except Exception as e:
-                print(f"保存状态时出错: {str(e)}")
                 self.log_message(f"保存状态时出错: {str(e)}", "ERROR")
             
             try:
@@ -745,9 +451,9 @@ class SeatMonitor:
                 today = datetime.date.today()
                 self.generate_daily_report(today)
             except Exception as e:
-                print(f"生成报告时出错: {str(e)}")
+                self.log_message(f"生成报告时出错: {str(e)}", "ERROR")
             
-            print("座位监控系统已关闭")
+            self.log_message("座位监控系统已关闭", "INFO")
 
 def main(debug=False):
     """主函数，程序的入口点"""
@@ -757,7 +463,7 @@ def main(debug=False):
         # 运行监控系统
         monitor.run()
     except Exception as e:
-        print(f"程序运行出错: {str(e)}")
+        self.log_message(f"程序运行出错: {str(e)}", "ERROR")
         import traceback
         traceback.print_exc()
         return 1

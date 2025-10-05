@@ -530,22 +530,24 @@ class SeatMonitor:
             draw = ImageDraw.Draw(pil_img)
             
             # 尝试加载中文字体，支持多种可能的字体路径和名称
-            # 优先使用系统已确认存在的中文字体
+            # 优先使用树莓派5 texie系统常用中文字体
             font_path_candidates = [
-                # 系统已确认存在的中文字体（优先使用）
+                # 树莓派/Linux系统常用中文字体（优先使用）
                 '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
-                # Linux 常用中文字体
-                '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
                 '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
-                '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
-                '/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc',
+                '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+                '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
+                '/usr/share/fonts/truetype/noto/NotoSerifCJK-Regular.ttc',
+                '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+                '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
                 # Windows 常用中文字体
                 'C:/Windows/Fonts/simhei.ttf',
                 'C:/Windows/Fonts/simsun.ttc',
                 'C:/Windows/Fonts/msyh.ttc',
                 # 通用字体名称（系统会自动查找）
-                'SimHei', 'WenQuanYi Micro Hei', 'Heiti TC', 'Microsoft YaHei',
-                'Arial Unicode MS', 'Noto Sans CJK', 'Noto Serif CJK'
+                'WenQuanYi Micro Hei', 'WenQuanYi Zen Hei', 'SimHei', 
+                'Heiti TC', 'Microsoft YaHei', 'Arial Unicode MS', 
+                'Noto Sans CJK', 'Noto Serif CJK', 'Droid Sans Fallback'
             ]
             
             # 尝试加载字体，如果找不到则使用默认字体

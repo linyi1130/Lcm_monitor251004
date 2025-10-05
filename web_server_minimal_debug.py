@@ -83,6 +83,21 @@ def web_monitor_debug_page():
         error_html = f"<html><body><h1>错误</h1><p>无法加载监控调试页面: {str(e)}</p></body></html>"
         return Response(error_html, mimetype='text/html')
 
+# 优化版监控页面端点
+@app.route('/web_monitor_optimized.html')
+def web_monitor_optimized_page():
+    """提供优化版监控页面，支持平滑图像刷新"""
+    try:
+        # 读取优化版HTML文件内容
+        with open('web_monitor_optimized.html', 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        return Response(html_content, mimetype='text/html')
+    except Exception as e:
+        print(f"提供优化版监控页面时出错: {str(e)}")
+        # 返回错误页面
+        error_html = f"<html><body><h1>错误</h1><p>无法加载优化版监控页面: {str(e)}</p></body></html>"
+        return Response(error_html, mimetype='text/html')
+
 # 检查共享帧目录和文件
 print("=== 座位监控系统 - 极简调试版 ===")
 print(f"共享帧目录: {SHARED_FRAME_DIR}")
@@ -191,6 +206,10 @@ def index():
                 {% if file_exists %}
                 文件大小: {{ file_size }} 字节<br/>
                 {% endif %}
+                <br/>
+                <strong>页面选项:</strong><br/>
+                <a href="/web_monitor_debug.html">标准调试页面</a><br/>
+                <a href="/web_monitor_optimized.html">优化版页面 (平滑刷新)</a>
             </div>
         </div>
         <script>
@@ -338,7 +357,9 @@ if __name__ == '__main__':
             print(f"创建共享帧目录失败: {str(e)}")
     
     print("\n=== 服务器信息 ===")
-    print("请在浏览器中访问 http://localhost:5001 查看监控画面")
+    print("请在浏览器中访问以下页面:")
+    print("- 标准版本: http://localhost:5001 或 http://localhost:5001/web_monitor_debug.html")
+    print("- 优化版本: http://localhost:5001/web_monitor_optimized.html (支持平滑图像刷新)")
     print("调试功能: /test_image 生成测试图像")
     print("\n服务器启动中...\n")
     

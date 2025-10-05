@@ -529,24 +529,64 @@ class SeatMonitor:
             pil_img = Image.fromarray(cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB))
             draw = ImageDraw.Draw(pil_img)
             
-            # 尝试加载中文字体，支持多种可能的字体路径
+            # 尝试加载中文字体，支持多种可能的字体路径和名称
             font_path_candidates = [
-                '/System/Library/Fonts/PingFang.ttc',  # macOS
-                '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',  # Linux
-                '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',  # Linux
-                'C:/Windows/Fonts/simhei.ttf'  # Windows
+                # macOS 常用中文字体
+                '/System/Library/Fonts/PingFang.ttc',
+                '/System/Library/Fonts/SFNSMono.ttf',
+                '/System/Library/Fonts/STHeiti Medium.ttc',
+                '/System/Library/Fonts/Songti.ttc',
+                # Linux 常用中文字体
+                '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+                '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
+                '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+                '/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc',
+                '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
+                # Windows 常用中文字体
+                'C:/Windows/Fonts/simhei.ttf',
+                'C:/Windows/Fonts/simsun.ttc',
+                'C:/Windows/Fonts/msyh.ttc',
+                # 通用字体名称（系统会自动查找）
+                'SimHei', 'WenQuanYi Micro Hei', 'Heiti TC', 'Microsoft YaHei',
+                'Arial Unicode MS', 'Noto Sans CJK', 'Noto Serif CJK'
             ]
             
             # 尝试加载字体，如果找不到则使用默认字体
             font = None
+            font_large = None
+            loaded_font_path = None
+            
             for font_path in font_path_candidates:
                 try:
+                    # 尝试作为字体路径加载
                     if os.path.exists(font_path):
-                        font = ImageFont.truetype(font_path, 16)  # 普通文本字体大小
-                        font_large = ImageFont.truetype(font_path, 24)  # 较大文本字体大小
+                        font = ImageFont.truetype(font_path, 16)
+                        font_large = ImageFont.truetype(font_path, 24)
+                        loaded_font_path = font_path
                         break
                 except Exception:
-                    continue
+                    try:
+                        # 尝试作为字体名称加载
+                        font = ImageFont.truetype(font_path, 16)
+                        font_large = ImageFont.truetype(font_path, 24)
+                        loaded_font_path = font_path
+                        break
+                    except Exception:
+                        continue
+            
+            # 记录字体加载状态
+            if self.debug_mode:
+                if font:
+                    self.log_message(f"成功加载字体: {loaded_font_path}", "INFO")
+                else:
+                    self.log_message("未能加载中文字体，将使用默认字体（可能显示乱码）", "WARNING")
+                    # 尝试使用PIL默认字体作为最后的备选
+                    try:
+                        font = ImageFont.load_default()
+                        font_large = ImageFont.load_default()
+                        self.log_message("已加载PIL默认字体", "INFO")
+                    except Exception:
+                        self.log_message("无法加载任何字体", "ERROR")
             
             # 为每个座位区域绘制边界和状态信息
             for seat in self.seat_regions:

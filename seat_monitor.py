@@ -518,17 +518,21 @@ class SeatMonitor:
                 region_points = np.array(region, dtype=np.int32)
                 cv2.polylines(display_frame, [region_points], True, color, 2)
                 
-                # 在区域左上角显示座位名称和状态
+                # 获取当前时间用于标记
+                seat_time = datetime.datetime.now().strftime("%H:%M:%S")
+                
+                # 在区域左上角显示座位名称、状态和时间
                 text_position = tuple(region_points[0])
-                text = f"{seat_name}: {'占用' if is_occupied else '空闲'}"
+                text = f"{seat_name}: {'占用' if is_occupied else '空闲'} [{seat_time}]"
                 cv2.putText(display_frame, text, text_position, 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
                 
-                # 如果座位被占用，显示占用时长
+                # 如果座位被占用，显示占用时长和进入时间
                 if is_occupied and 'entry_time' in status:
                     duration = (datetime.datetime.now() - status['entry_time']).total_seconds()
                     minutes, seconds = divmod(int(duration), 60)
-                    duration_text = f"时长: {minutes}m{seconds}s"
+                    entry_time_str = status['entry_time'].strftime("%H:%M:%S")
+                    duration_text = f"时长: {minutes}m{seconds}s | 进入: {entry_time_str}"
                     duration_position = (text_position[0], text_position[1] + 20)
                     cv2.putText(display_frame, duration_text, duration_position, 
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
@@ -537,13 +541,15 @@ class SeatMonitor:
                 if self.debug_mode:
                     self.log_message(f"绘制座位{seat_name}时出错: {str(e)}", "ERROR")
         
-        # 在左上角显示当前时间
+        # 获取当前时间并格式化
         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cv2.putText(display_frame, current_time, (10, 30), 
+        
+        # 在左上角显示当前时间
+        cv2.putText(display_frame, f"时间: {current_time}", (10, 30), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         
-        # 显示系统状态
-        status_text = f"系统状态: 运行中 | FPS: {self.config['camera']['framerate']}"
+        # 显示系统状态，包含时间标记
+        status_text = f"[{current_time}] 系统状态: 运行中 | FPS: {self.config['camera']['framerate']}"
         cv2.putText(display_frame, status_text, (10, 60), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         

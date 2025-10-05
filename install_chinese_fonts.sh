@@ -3,6 +3,17 @@
 # 树莓派5 texie系统安装中文字体脚本
 # 用于解决Python PIL库中文显示问题
 
+# 系统检测
+if [[ "$(uname)" == "Darwin" ]]; then
+  echo "警告: 此脚本为树莓派Linux系统设计，在macOS上运行可能会失败。"
+  echo "在macOS上安装中文字体，请参考系统偏好设置 -> 字体管理。"
+  read -p "是否继续执行脚本？(y/n): " choice
+  case "$choice" in 
+    y|Y ) echo "继续执行脚本...";;
+    * ) echo "脚本已取消执行。"; exit 0;;
+  esac
+fi
+
 # 确保以root权限运行
 if [ "$EUID" -ne 0 ]
   then echo "请以root权限运行此脚本: sudo ./install_chinese_fonts.sh"

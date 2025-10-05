@@ -786,7 +786,7 @@ class SeatMonitor:
             cv2.imwrite(self.shared_frame_path, frame)
             
             # 调试信息
-            if self.debug:
+            if self.debug_mode:
                 self.log_message(f"已保存共享帧到: {self.shared_frame_path}", "DEBUG")
         except Exception as e:
             self.log_message(f"保存共享帧时出错: {str(e)}", "ERROR")

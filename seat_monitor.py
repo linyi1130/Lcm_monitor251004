@@ -698,9 +698,9 @@ class SeatMonitor:
             window_name = '座位监控系统'
             cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
             
-            # 调整窗口大小以便手机预览（设置为适合手机屏幕的尺寸）
-            # 使用640x360的小窗口，适合手机远程桌面查看
-            cv2.resizeWindow(window_name, 640, 360)
+            # 调整窗口大小以便手机预览（设置为更小的尺寸）
+            # 使用480x270的窗口，适合手机远程桌面查看且更节省屏幕空间
+            cv2.resizeWindow(window_name, 480, 270)
             
             # 设置窗口位置，紧贴位于系统上方状态栏（左上角位置）
             cv2.moveWindow(window_name, 0, 0)  # (x, y)坐标设置为(0, 0)，使窗口左上角对齐屏幕左上角

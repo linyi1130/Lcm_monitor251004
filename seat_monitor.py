@@ -403,8 +403,9 @@ class SeatMonitor:
                     current_status['entry_time'] = current_time
                     current_status['person_id'] = f"person_{current_time.strftime('%Y%m%d%H%M%S')}_{seat_id}"
                     
-                    # 记录状态变更
-                    self.log_message(f"{seat_name}状态变更: 空闲 -> 已占用", "INFO")
+                    # 记录状态变更，添加时间标记
+                    timestamp_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
+                    self.log_message(f"[{timestamp_str}] {seat_name}状态变更: 空闲 -> 已占用", "INFO")
                     
                     # 创建新的占用记录
                     self.records.append({
@@ -441,7 +442,9 @@ class SeatMonitor:
                                 record['duration_seconds'] = duration
                                 break
                         
-                        self.log_message(f"{seat_name}状态变更: 已占用 -> 空闲, 持续时长: {int(duration)}秒", "INFO")
+                        # 记录状态变更，添加时间标记
+                        timestamp_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
+                        self.log_message(f"[{timestamp_str}] {seat_name}状态变更: 已占用 -> 空闲, 持续时长: {int(duration)}秒", "INFO")
         
         # 定期保存数据
         if (current_time - self.last_save_time).total_seconds() >= self.save_interval:

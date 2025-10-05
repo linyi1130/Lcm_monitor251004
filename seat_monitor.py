@@ -18,6 +18,8 @@ import json
 from pathlib import Path
 import math
 from PIL import Image, ImageDraw, ImageFont
+import os
+import threading
 
 class SeatMonitor:
     def __init__(self, config_file='config.json', debug=False):
@@ -41,6 +43,18 @@ class SeatMonitor:
         self.camera.start()
         if self.config['camera']['rotation'] != 0:
             self.camera.rotation = self.config['camera']['rotation']
+        
+        # 设置共享帧目录和文件路径
+        self.shared_frames_dir = "shared_frames"
+        self.shared_frame_path = os.path.join(self.shared_frames_dir, "current_frame.jpg")
+        
+        # 创建共享帧目录（如果不存在）
+        if not os.path.exists(self.shared_frames_dir):
+            try:
+                os.makedirs(self.shared_frames_dir)
+                self.log_message(f"创建共享帧目录: {self.shared_frames_dir}", "INFO")
+            except Exception as e:
+                self.log_message(f"创建共享帧目录失败: {str(e)}", "ERROR")
         
         # 设置座位区域 - 直接使用配置文件中的区域
         self.seat_regions = []
@@ -707,6 +721,15 @@ class SeatMonitor:
                     # 绘制叠加层
                     display_frame = self.draw_overlay(frame)
                     
+                    # 保存帧到共享目录（使用线程避免阻塞主循环）
+                    try:
+                        # 创建一个临时帧用于保存
+                        shared_frame = display_frame.copy()
+                        # 使用线程异步保存帧
+                        threading.Thread(target=self._save_frame_to_shared, args=(shared_frame,)).start()
+                    except Exception as e:
+                        self.log_message(f"保存共享帧时出错: {str(e)}", "ERROR")
+                    
                     # 显示结果
                     cv2.imshow(window_name, display_frame)
                     
@@ -751,6 +774,22 @@ class SeatMonitor:
                 self.log_message(f"生成报告时出错: {str(e)}", "ERROR")
             
             self.log_message("座位监控系统已关闭", "INFO")
+            
+    def _save_frame_to_shared(self, frame):
+        """将当前帧保存到共享目录（在单独线程中执行）"""
+        try:
+            # 确保共享目录存在
+            if not os.path.exists(self.shared_frames_dir):
+                os.makedirs(self.shared_frames_dir)
+                
+            # 保存帧到文件
+            cv2.imwrite(self.shared_frame_path, frame)
+            
+            # 调试信息
+            if self.debug:
+                self.log_message(f"已保存共享帧到: {self.shared_frame_path}", "DEBUG")
+        except Exception as e:
+            self.log_message(f"保存共享帧时出错: {str(e)}", "ERROR")
 
 def main(debug=False):
     """主函数，程序的入口点"""

@@ -73,35 +73,68 @@ class WebMonitorServer:
             }
     
     def initialize_camera(self):
-        """初始化摄像头"""
+        """初始化摄像头或准备从已运行的监控系统获取画面"""
         try:
             # 尝试导入Picamera2（树莓派专用）
             try:
                 from picamera2 import Picamera2
                 
-                self.camera = Picamera2()
-                camera_config = self.camera.create_preview_configuration(
-                    main={"size": (self.config['camera']['resolution']['width'], 
-                                  self.config['camera']['resolution']['height'])}
-                )
-                self.camera.configure(camera_config)
-                self.camera.start()
-                if self.config['camera']['rotation'] != 0:
-                    self.camera.rotation = self.config['camera']['rotation']
-                logger.info(f"已初始化Picamera2摄像头，分辨率: {self.config['camera']['resolution']['width']}x{self.config['camera']['resolution']['height']}")
+                # 尝试初始化摄像头，但如果失败，则准备使用替代方式
+                try:
+                    self.camera = Picamera2()
+                    camera_config = self.camera.create_preview_configuration(
+                        main={"size": (self.config['camera']['resolution']['width'], 
+                                      self.config['camera']['resolution']['height'])}
+                    )
+                    self.camera.configure(camera_config)
+                    self.camera.start()
+                    if self.config['camera']['rotation'] != 0:
+                        self.camera.rotation = self.config['camera']['rotation']
+                    logger.info(f"已初始化Picamera2摄像头，分辨率: {self.config['camera']['resolution']['width']}x{self.config['camera']['resolution']['height']}")
+                    # 设置为直接模式
+                    self.frame_source = "direct"
+                except RuntimeError as e:
+                    # 如果摄像头被占用，切换到替代模式
+                    if "Device or resource busy" in str(e):
+                        logger.warning("摄像头已被占用，将使用替代方式获取画面")
+                        self.camera = None
+                        # 创建一个共享目录用于帧共享
+                        self.shared_frame_dir = os.path.join(os.path.dirname(__file__), "shared_frames")
+                        if not os.path.exists(self.shared_frame_dir):
+                            os.makedirs(self.shared_frame_dir)
+                        self.frame_file = os.path.join(self.shared_frame_dir, "current_frame.jpg")
+                        # 设置为共享模式
+                        self.frame_source = "shared"
+                    else:
+                        raise e
             except ImportError:
                 # 如果没有Picamera2，尝试使用OpenCV
                 logger.info("尝试使用OpenCV初始化摄像头")
-                self.camera = cv2.VideoCapture(0)
-                if not self.camera.isOpened():
-                    raise Exception("无法打开摄像头")
-                # 设置分辨率
-                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.config['camera']['resolution']['width'])
-                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config['camera']['resolution']['height'])
-                logger.info(f"已初始化OpenCV摄像头，分辨率: {self.config['camera']['resolution']['width']}x{self.config['camera']['resolution']['height']}")
+                try:
+                    self.camera = cv2.VideoCapture(0)
+                    if not self.camera.isOpened():
+                        # 摄像头被占用，切换到共享模式
+                        logger.warning("摄像头已被占用，将使用替代方式获取画面")
+                        self.camera = None
+                        self.shared_frame_dir = os.path.join(os.path.dirname(__file__), "shared_frames")
+                        if not os.path.exists(self.shared_frame_dir):
+                            os.makedirs(self.shared_frame_dir)
+                        self.frame_file = os.path.join(self.shared_frame_dir, "current_frame.jpg")
+                        self.frame_source = "shared"
+                    else:
+                        # 设置分辨率
+                        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.config['camera']['resolution']['width'])
+                        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config['camera']['resolution']['height'])
+                        logger.info(f"已初始化OpenCV摄像头，分辨率: {self.config['camera']['resolution']['width']}x{self.config['camera']['resolution']['height']}")
+                        self.frame_source = "direct"
+                except Exception as e:
+                    logger.error(f"OpenCV初始化失败: {str(e)}")
+                    self.camera = None
+                    self.frame_source = "none"
         except Exception as e:
             logger.error(f"初始化摄像头失败: {str(e)}")
             self.camera = None
+            self.frame_source = "none"
     
     def register_routes(self):
         """注册Flask路由"""
@@ -201,10 +234,91 @@ class WebMonitorServer:
             return status_info
     
     def generate_video_frames(self):
-        """生成视频帧流"""
+        """生成视频帧流，支持直接模式和共享模式"""
         while True:
-            if self.camera is None:
-                # 如果摄像头未初始化，发送一个错误帧
+            # 根据不同的帧源获取帧
+            if hasattr(self, 'frame_source') and self.frame_source == 'shared':
+                # 共享模式：从共享文件读取帧
+                try:
+                    # 检查共享文件是否存在
+                    if os.path.exists(self.frame_file):
+                        # 尝试读取共享文件
+                        frame = cv2.imread(self.frame_file)
+                        if frame is not None:
+                            # 添加时间戳和模式标识
+                            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            cv2.putText(frame, current_time, (10, 30), 
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                            cv2.putText(frame, "共享模式", (10, 60), 
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                            
+                            # 编码为JPEG
+                            ret, buffer = cv2.imencode('.jpg', frame)
+                            if ret:
+                                frame = buffer.tobytes()
+                                # 生成MJPEG流
+                                yield (b'--frame\r\n' 
+                                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                    else:
+                        # 如果共享文件不存在，显示等待画面
+                        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                        cv2.putText(frame, "等待监控系统画面...", (50, 240), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+                        ret, buffer = cv2.imencode('.jpg', frame)
+                        frame = buffer.tobytes()
+                        yield (b'--frame\r\n' 
+                               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                    # 控制帧率
+                    time.sleep(1 / self.config['camera']['framerate'])
+                except Exception as e:
+                    logger.error(f"共享模式获取帧时出错: {str(e)}")
+                    time.sleep(1)
+            elif self.camera is not None:
+                # 直接模式：直接从摄像头获取帧
+                try:
+                    # 获取帧
+                    if hasattr(self.camera, 'capture_array'):
+                        # Picamera2
+                        frame = self.camera.capture_array()
+                        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)  # 转换颜色空间
+                    else:
+                        # OpenCV
+                        ret, frame = self.camera.read()
+                        if not ret:
+                            logger.error("无法获取摄像头帧")
+                            time.sleep(1)
+                            continue
+                    
+                    # 按配置旋转图像
+                    if self.config['camera']['rotation'] != 0:
+                        frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE * (self.config['camera']['rotation'] // 90))
+                    
+                    # 添加时间戳
+                    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    cv2.putText(frame, current_time, (10, 30), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                    
+                    # 编码为JPEG
+                    ret, buffer = cv2.imencode('.jpg', frame)
+                    if not ret:
+                        logger.error("无法编码帧")
+                        time.sleep(1)
+                        continue
+                    
+                    frame = buffer.tobytes()
+                    
+                    # 生成MJPEG流
+                    yield (b'--frame\r\n' 
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                    
+                    # 控制帧率
+                    time.sleep(1 / self.config['camera']['framerate'])
+                    
+                except Exception as e:
+                    logger.error(f"直接模式获取帧时出错: {str(e)}")
+                    time.sleep(1)
+            else:
+                # 摄像头未初始化，显示错误画面
                 frame = np.zeros((480, 640, 3), dtype=np.uint8)
                 cv2.putText(frame, "摄像头未初始化", (50, 240), 
                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
@@ -212,50 +326,6 @@ class WebMonitorServer:
                 frame = buffer.tobytes()
                 yield (b'--frame\r\n' 
                        b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-                time.sleep(1)
-                continue
-                
-            try:
-                # 获取帧
-                if hasattr(self.camera, 'capture_array'):
-                    # Picamera2
-                    frame = self.camera.capture_array()
-                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)  # 转换颜色空间
-                else:
-                    # OpenCV
-                    ret, frame = self.camera.read()
-                    if not ret:
-                        logger.error("无法获取摄像头帧")
-                        time.sleep(1)
-                        continue
-                
-                # 按配置旋转图像
-                if self.config['camera']['rotation'] != 0:
-                    frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE * (self.config['camera']['rotation'] // 90))
-                
-                # 添加时间戳
-                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                cv2.putText(frame, current_time, (10, 30), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                
-                # 编码为JPEG
-                ret, buffer = cv2.imencode('.jpg', frame)
-                if not ret:
-                    logger.error("无法编码帧")
-                    time.sleep(1)
-                    continue
-                
-                frame = buffer.tobytes()
-                
-                # 生成MJPEG流
-                yield (b'--frame\r\n' 
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-                
-                # 控制帧率
-                time.sleep(1 / self.config['camera']['framerate'])
-                
-            except Exception as e:
-                logger.error(f"生成视频帧时出错: {str(e)}")
                 time.sleep(1)
     
     def start(self):

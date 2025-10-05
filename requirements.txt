@@ -7,3 +7,6 @@ matplotlib
 face_recognition
 pandas-stubs
 opencv-python
+flask
+ipp
+gunicorn  # 用于生产环境部署

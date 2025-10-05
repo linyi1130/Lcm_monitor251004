@@ -1,0 +1,14 @@
+[Unit]
+Description=座位监控系统Web服务
+After=network.target
+
+[Service]
+Type=simple
+User=%I
+WorkingDirectory=/Users/linyi/project/Lcm_monitor251004
+ExecStart=/usr/bin/python3 /Users/linyi/project/Lcm_monitor251004/web_server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

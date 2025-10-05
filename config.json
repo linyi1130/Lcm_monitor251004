@@ -22,6 +22,14 @@
         "upper_body_min_height_ratio": 0.3,
         "upper_body_center_offset": 0.25
     },
+  "web": {
+    "port": 5000,
+    "host": "0.0.0.0",
+    "enable_remote": false,
+    "auth_required": false,
+    "username": "admin",
+    "password": "admin"
+  },
   "seats": [
     {
       "id": 1,

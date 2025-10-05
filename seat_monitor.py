@@ -167,8 +167,8 @@ class SeatMonitor:
             self.log_message("静态检测已禁用，使用优化的前景检测模式", "INFO")
             
             # 获取配置参数，但使用更稳定的默认值
-            history = 150  # 减少历史帧数，加快对真实变化的响应
-            var_threshold = 20  # 提高方差阈值，减少噪声影响
+            history = 200  # 增加历史帧数，提高稳定性
+            var_threshold = 30  # 增加方差阈值，减少噪点干扰
             
             # 创建背景减除器，关闭阴影检测
             self.back_sub = cv2.createBackgroundSubtractorMOG2(
@@ -412,8 +412,8 @@ class SeatMonitor:
                 self.enter_counters[seat_id] += 1
                 self.leave_counters[seat_id] = 0
                 
-                # 连续5帧确认有人才更新状态（约0.5秒）
-                if not current_status['occupied'] and self.enter_counters[seat_id] >= 5:
+                # 增加连续确认帧数到10帧，减少误判
+                if not current_status['occupied'] and self.enter_counters[seat_id] >= 10:
                     current_status['occupied'] = True
                     current_status['entry_time'] = current_time
                     current_status['person_id'] = f"person_{current_time.strftime('%Y%m%d%H%M%S')}_{seat_id}"
@@ -433,8 +433,8 @@ class SeatMonitor:
                 self.leave_counters[seat_id] += 1
                 self.enter_counters[seat_id] = 0
                 
-                # 增加阈值到20帧（约2秒）才确认离开，大幅减少误判
-                if current_status['occupied'] and self.leave_counters[seat_id] >= 20:
+                # 增加阈值到30帧（约3秒）才确认离开，进一步减少误判
+                if current_status['occupied'] and self.leave_counters[seat_id] >= 30:
                     current_status['occupied'] = False
                     current_status['exit_time'] = current_time
                     
@@ -448,8 +448,8 @@ class SeatMonitor:
                                 record['duration_seconds'] = duration
                                 break
                         
-                        # 提高最小持续时间阈值到5秒
-                        if duration >= 5:
+                        # 进一步提高最小持续时间阈值到10秒，忽略更短的占用
+                        if duration >= 10:
                             timestamp_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
                             self.log_message(f"[{timestamp_str}] {seat_name}状态变更: 已占用 -> 空闲, 持续时长: {int(duration)}秒", "INFO")
                         else:

@@ -378,6 +378,123 @@ class SeatMonitor:
         except Exception as e:
             self.log_message(f"生成报告时出错: {str(e)}", "ERROR")
     
+    def update_occupancy_status(self, frame):
+        """更新座位的占用状态"""
+        # 获取当前时间
+        current_time = datetime.datetime.now()
+        
+        # 对每个座位区域进行人员检测
+        for seat in self.seat_regions:
+            seat_id = seat['id']
+            seat_name = seat['name']
+            region = seat['region']
+            
+            # 检测区域内是否有人
+            is_occupied = self.detect_person_in_region(frame, region)
+            
+            # 获取当前座位状态
+            current_status = self.occupancy_status[seat_id]
+            
+            # 如果检测到有人
+            if is_occupied:
+                # 如果之前是空闲状态，更新为占用状态
+                if not current_status['occupied']:
+                    current_status['occupied'] = True
+                    current_status['entry_time'] = current_time
+                    current_status['person_id'] = f"person_{current_time.strftime('%Y%m%d%H%M%S')}_{seat_id}"
+                    
+                    # 记录状态变更
+                    self.log_message(f"{seat_name}状态变更: 空闲 -> 已占用", "INFO")
+                    
+                    # 创建新的占用记录
+                    self.records.append({
+                        'timestamp': current_time.isoformat(),
+                        'seat_id': seat_id,
+                        'seat_name': seat_name,
+                        'person_id': current_status['person_id'],
+                        'action': 'enter'
+                    })
+                
+                # 重置离开计数器
+                self.leave_counters[seat_id] = 0
+            else:
+                # 如果检测到无人
+                # 增加离开计数器
+                self.leave_counters[seat_id] += 1
+                
+                # 如果连续多帧检测到无人，且当前状态为占用，则更新为空闲状态
+                # 使用计数器来滤波，避免误报
+                # 假设帧率为10fps，连续5帧表示0.5秒无人
+                if current_status['occupied'] and self.leave_counters[seat_id] >= 5:
+                    current_status['occupied'] = False
+                    current_status['exit_time'] = current_time
+                    
+                    # 计算占用时长
+                    if current_status['entry_time']:
+                        duration = (current_time - current_status['entry_time']).total_seconds()
+                        current_status['duration'] = duration
+                        
+                        # 更新记录的结束时间和持续时间
+                        for record in reversed(self.records):
+                            if record['person_id'] == current_status['person_id'] and record['action'] == 'enter':
+                                record['exit_time'] = current_time.isoformat()
+                                record['duration_seconds'] = duration
+                                break
+                        
+                        self.log_message(f"{seat_name}状态变更: 已占用 -> 空闲, 持续时长: {int(duration)}秒", "INFO")
+        
+        # 定期保存数据
+        if (current_time - self.last_save_time).total_seconds() >= self.save_interval:
+            self.save_current_state()
+            self.last_save_time = current_time
+            
+        # 定期生成报告
+        if current_time.date() > self.last_report_generation:
+            try:
+                yesterday = current_time.date() - datetime.timedelta(days=1)
+                self.generate_daily_report(yesterday)
+                self.last_report_generation = current_time.date()
+            except Exception as e:
+                self.log_message(f"生成报告时出错: {str(e)}", "ERROR")
+    
+    def detect_person_in_region(self, frame, region):
+        """检测指定区域内是否有人"""
+        # 如果背景减除器未初始化，返回默认值
+        if self.back_sub is None:
+            return False
+        
+        try:
+            # 创建掩码，只处理监控区域内的部分
+            mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+            region_points = np.array(region, dtype=np.int32)
+            cv2.fillPoly(mask, [region_points], 255)
+            
+            # 应用掩码到帧
+            masked_frame = cv2.bitwise_and(frame, frame, mask=mask)
+            
+            # 使用背景减除器获取前景
+            fg_mask = self.back_sub.apply(masked_frame, learningRate=self.bg_learning_rate)
+            
+            # 对前景掩码进行形态学操作，去除噪声
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel)
+            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
+            
+            # 计算前景区域的面积
+            foreground_area = cv2.countNonZero(fg_mask)
+            
+            # 根据配置的运动阈值判断是否有人
+            motion_threshold = self.config['detection']['motion_threshold']
+            is_occupied = foreground_area > motion_threshold
+            
+            if self.debug_mode:
+                self.log_message(f"区域检测: 前景面积={foreground_area}, 阈值={motion_threshold}, 结果={is_occupied}", "DEBUG")
+            
+            return is_occupied
+        except Exception as e:
+            self.log_message(f"区域检测出错: {str(e)}", "ERROR")
+            return False
+    
     def run(self):
         """运行监控系统"""
         try:
@@ -463,7 +580,8 @@ def main(debug=False):
         # 运行监控系统
         monitor.run()
     except Exception as e:
-        self.log_message(f"程序运行出错: {str(e)}", "ERROR")
+        # 使用普通print语句，因为self变量在这里不可用
+        print(f"程序运行出错: {str(e)}")
         import traceback
         traceback.print_exc()
         return 1

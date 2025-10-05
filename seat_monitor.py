@@ -602,37 +602,41 @@ class SeatMonitor:
                 color = (255, 0, 0) if is_occupied else (0, 255, 0)  # 占用:红色, 空闲:绿色
                 
                 try:
-                    # 绘制区域边界 (仍使用OpenCV绘制)
-                    region_points = np.array(region, dtype=np.int32)
-                    cv2.polylines(display_frame, [region_points], True, (color[2], color[1], color[0]), 2)
-                    
                     # 获取当前时间用于标记
                     seat_time = datetime.datetime.now().strftime("%H:%M:%S")
                     
                     # 在区域左上角显示座位名称、状态和时间
+                    region_points = np.array(region, dtype=np.int32)
                     text_position = tuple(region_points[0])
                     text = f"{seat_name}: {'占用' if is_occupied else '空闲'} [{seat_time}]"
                     
-                    # 使用PIL绘制中文文本
+                    # 使用PIL绘制中文文本和区域边界
                     if font:
+                        # 绘制区域边界（使用PIL绘制多边形）
+                        draw.polygon(tuple(map(tuple, region_points)), outline=color, width=2)
+                        # 绘制文本
                         draw.text((text_position[0], text_position[1] - 20), text, font=font, fill=color)
+                        
+                        # 如果座位被占用，显示占用时长和进入时间
+                        if is_occupied and 'entry_time' in status:
+                            duration = (datetime.datetime.now() - status['entry_time']).total_seconds()
+                            minutes, seconds = divmod(int(duration), 60)
+                            entry_time_str = status['entry_time'].strftime("%H:%M:%S")
+                            duration_text = f"时长: {minutes}m{seconds}s | 进入: {entry_time_str}"
+                            duration_position = (text_position[0], text_position[1])
+                            draw.text(duration_position, duration_text, font=font, fill=color)
                     else:
                         # 如果无法加载字体，回退到OpenCV（可能仍显示乱码）
+                        cv2.polylines(display_frame, [region_points], True, (color[2], color[1], color[0]), 2)
                         cv2.putText(display_frame, text, text_position, 
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (color[2], color[1], color[0]), 2)
-                    
-                    # 如果座位被占用，显示占用时长和进入时间
-                    if is_occupied and 'entry_time' in status:
-                        duration = (datetime.datetime.now() - status['entry_time']).total_seconds()
-                        minutes, seconds = divmod(int(duration), 60)
-                        entry_time_str = status['entry_time'].strftime("%H:%M:%S")
-                        duration_text = f"时长: {minutes}m{seconds}s | 进入: {entry_time_str}"
-                        duration_position = (text_position[0], text_position[1])
                         
-                        # 使用PIL绘制中文文本
-                        if font:
-                            draw.text(duration_position, duration_text, font=font, fill=color)
-                        else:
+                        if is_occupied and 'entry_time' in status:
+                            duration = (datetime.datetime.now() - status['entry_time']).total_seconds()
+                            minutes, seconds = divmod(int(duration), 60)
+                            entry_time_str = status['entry_time'].strftime("%H:%M:%S")
+                            duration_text = f"时长: {minutes}m{seconds}s | 进入: {entry_time_str}"
+                            duration_position = (text_position[0], text_position[1])
                             cv2.putText(display_frame, duration_text, duration_position, 
                                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (color[2], color[1], color[0]), 1)
                     
@@ -649,10 +653,11 @@ class SeatMonitor:
             
             # 使用PIL绘制中文文本
             if font:
+                # 绘制时间和状态文本
                 draw.text((10, 10), time_text, font=font_large, fill=(255, 255, 255))
                 draw.text((10, 40), status_text, font=font_large, fill=(255, 255, 255))
                 
-                # 将PIL图像转回OpenCV格式
+                # 在所有绘制操作完成后，将PIL图像转回OpenCV格式
                 display_frame = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
             else:
                 # 回退到OpenCV

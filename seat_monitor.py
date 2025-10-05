@@ -163,28 +163,22 @@ class SeatMonitor:
     def initialize_background_subtractor(self):
         """初始化背景减除器，用于简化版的前景检测"""
         try:
-            # 从配置文件读取参数
-            static_detection_enabled = self.config['detection'].get('static_detection_enabled', False)
-            
             # 记录静态检测状态
-            if static_detection_enabled:
-                self.log_message("警告：配置文件中静态检测已启用，但当前为简化版，静态检测功能将被忽略", "WARNING")
-            else:
-                self.log_message("静态检测已禁用，使用简化的前景检测模式", "INFO")
+            self.log_message("静态检测已禁用，使用优化的前景检测模式", "INFO")
             
-            # 获取配置参数
-            history = self.config['detection'].get('back_sub_history', 300)
-            var_threshold = self.config['detection'].get('back_sub_var_threshold', 10)
+            # 获取配置参数，但使用更稳定的默认值
+            history = 150  # 减少历史帧数，加快对真实变化的响应
+            var_threshold = 20  # 提高方差阈值，减少噪声影响
             
-            # 创建背景减除器，关闭阴影检测以简化处理
+            # 创建背景减除器，关闭阴影检测
             self.back_sub = cv2.createBackgroundSubtractorMOG2(
                 history=history,
                 varThreshold=var_threshold,
                 detectShadows=False
             )
             
-            # 设置学习率，使用较高的学习率以加快背景适应
-            self.bg_learning_rate = 0.01  # 适中的学习率，平衡敏感性和稳定性
+            # 设置学习率，使用较低的学习率以减少误判
+            self.bg_learning_rate = 0.001  # 降低学习率，使背景模型更稳定，减少静止人员被误判为背景
             
             self.log_message(f"背景减除器初始化成功: 历史帧={history}, 方差阈值={var_threshold}, 学习率={self.bg_learning_rate}", "INFO")
         except Exception as e:
@@ -379,9 +373,13 @@ class SeatMonitor:
             self.log_message(f"生成报告时出错: {str(e)}", "ERROR")
     
     def update_occupancy_status(self, frame):
-        """更新座位的占用状态"""
+        """更新座位的占用状态，优化版：增强稳定性，减少误判"""
         # 获取当前时间
         current_time = datetime.datetime.now()
+        
+        # 初始化状态追踪器
+        if not hasattr(self, 'occupancy_history'):
+            self.occupancy_history = {s['id']: [] for s in self.seat_regions}
         
         # 对每个座位区域进行人员检测
         for seat in self.seat_regions:
@@ -395,29 +393,34 @@ class SeatMonitor:
             # 获取当前座位状态
             current_status = self.occupancy_status[seat_id]
             
-            # 如果检测到有人
-            if is_occupied:
-                # 增加进入计数器
-                if not hasattr(self, 'enter_counters'):
-                    self.enter_counters = {s['id']: 0 for s in self.seat_regions}
+            # 维护最近的检测历史
+            self.occupancy_history[seat_id].append(is_occupied)
+            # 只保留最近15个状态（约1.5秒）
+            self.occupancy_history[seat_id] = self.occupancy_history[seat_id][-15:]
+            
+            # 使用历史状态来确定最终的占用状态，而不是单一帧的检测结果
+            # 如果历史中有80%的帧检测到有人，则认为当前是占用状态
+            history_occupied_ratio = sum(self.occupancy_history[seat_id]) / len(self.occupancy_history[seat_id])
+            final_occupied = history_occupied_ratio > 0.8  # 增加阈值以提高稳定性
+            
+            # 增加进入计数器
+            if not hasattr(self, 'enter_counters'):
+                self.enter_counters = {s['id']: 0 for s in self.seat_regions}
+            
+            # 如果综合判断为有人
+            if final_occupied:
                 self.enter_counters[seat_id] += 1
-                
-                # 重置离开计数器
                 self.leave_counters[seat_id] = 0
                 
-                # 如果之前是空闲状态，并且连续多帧检测到有人，才更新为占用状态
-                # 使用计数器来滤波，避免误报
-                # 连续3帧检测到有人才确认占用（约0.3秒）
-                if not current_status['occupied'] and self.enter_counters[seat_id] >= 3:
+                # 连续5帧确认有人才更新状态（约0.5秒）
+                if not current_status['occupied'] and self.enter_counters[seat_id] >= 5:
                     current_status['occupied'] = True
                     current_status['entry_time'] = current_time
                     current_status['person_id'] = f"person_{current_time.strftime('%Y%m%d%H%M%S')}_{seat_id}"
                     
-                    # 记录状态变更，添加时间标记
                     timestamp_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
                     self.log_message(f"[{timestamp_str}] {seat_name}状态变更: 空闲 -> 已占用", "INFO")
                     
-                    # 创建新的占用记录
                     self.records.append({
                         'timestamp': current_time.isoformat(),
                         'seat_id': seat_id,
@@ -426,42 +429,32 @@ class SeatMonitor:
                         'action': 'enter'
                     })
             else:
-                # 如果检测到无人
-                # 增加离开计数器
+                # 如果综合判断为无人
                 self.leave_counters[seat_id] += 1
+                self.enter_counters[seat_id] = 0
                 
-                # 重置进入计数器
-                if hasattr(self, 'enter_counters'):
-                    self.enter_counters[seat_id] = 0
-                
-                # 如果连续多帧检测到无人，且当前状态为占用，则更新为空闲状态
-                # 增加阈值到10帧（约1秒）以减少误判
-                if current_status['occupied'] and self.leave_counters[seat_id] >= 10:
+                # 增加阈值到20帧（约2秒）才确认离开，大幅减少误判
+                if current_status['occupied'] and self.leave_counters[seat_id] >= 20:
                     current_status['occupied'] = False
                     current_status['exit_time'] = current_time
                     
-                    # 计算占用时长
                     if current_status['entry_time']:
                         duration = (current_time - current_status['entry_time']).total_seconds()
                         current_status['duration'] = duration
                         
-                        # 更新记录的结束时间和持续时间
                         for record in reversed(self.records):
                             if record['person_id'] == current_status['person_id'] and record['action'] == 'enter':
                                 record['exit_time'] = current_time.isoformat()
                                 record['duration_seconds'] = duration
                                 break
                         
-                        # 添加最小持续时间检查，过滤掉短时间的误报
-                        if duration >= 3:  # 只有持续时间超过3秒才记录状态变更
-                            # 记录状态变更，添加时间标记
+                        # 提高最小持续时间阈值到5秒
+                        if duration >= 5:
                             timestamp_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
                             self.log_message(f"[{timestamp_str}] {seat_name}状态变更: 已占用 -> 空闲, 持续时长: {int(duration)}秒", "INFO")
                         else:
-                            # 短时间状态变更，静默修正
                             if self.debug_mode:
                                 self.log_message(f"[{timestamp_str}] {seat_name}短暂状态修正: 忽略短时间占用({int(duration)}秒)", "DEBUG")
-                            # 移除错误的进入记录
                             if self.records and self.records[-1]['action'] == 'enter' and self.records[-1]['person_id'] == current_status['person_id']:
                                 self.records.pop()
         
@@ -494,20 +487,28 @@ class SeatMonitor:
             # 应用掩码到帧
             masked_frame = cv2.bitwise_and(frame, frame, mask=mask)
             
-            # 使用背景减除器获取前景
+            # 使用背景减除器获取前景，降低学习率以减少误判
             fg_mask = self.back_sub.apply(masked_frame, learningRate=self.bg_learning_rate)
             
-            # 对前景掩码进行形态学操作，去除噪声
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel)
-            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
+            # 对前景掩码进行形态学操作，使用更大的核来更好地去除噪声
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))  # 增大核大小以更好地去除噪声
+            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel)  # 先闭操作填充小洞
+            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)   # 再开操作去除小物体
             
             # 计算前景区域的面积
             foreground_area = cv2.countNonZero(fg_mask)
             
-            # 根据配置的运动阈值判断是否有人
-            motion_threshold = self.config['detection']['motion_threshold']
-            is_occupied = foreground_area > motion_threshold
+            # 从配置获取运动阈值，但增加一个基于区域大小的动态调整因子
+            base_threshold = self.config['detection']['motion_threshold']
+            # 计算区域面积，根据区域大小动态调整阈值
+            region_area = cv2.contourArea(region_points)
+            # 阈值调整因子，确保小区域有较低的阈值，大区域有较高的阈值
+            adjusted_threshold = base_threshold * (region_area / (frame.shape[0] * frame.shape[1]))
+            
+            # 确保阈值不会过低或过高
+            adjusted_threshold = max(1000, min(10000, adjusted_threshold))
+            
+            is_occupied = foreground_area > adjusted_threshold
             
             if self.debug_mode:
                 self.log_message(f"区域检测: 前景面积={foreground_area}, 阈值={motion_threshold}, 结果={is_occupied}", "DEBUG")

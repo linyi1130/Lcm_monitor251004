@@ -694,9 +694,9 @@ class SeatMonitor:
         try:
             self.log_message("座位监控系统已启动，按'q'键退出", "INFO")
             
-            # 初始化显示窗口
+            # 初始化显示窗口 - 使用WINDOW_AUTOSIZE可能提供更一致的窗口行为
             window_name = '座位监控系统'
-            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+            cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
             
             # 调整窗口大小以便手机预览（设置为更小的尺寸）
             # 使用480x270的窗口，适合手机远程桌面查看且更节省屏幕空间
@@ -704,6 +704,12 @@ class SeatMonitor:
             
             # 设置窗口位置，紧贴位于系统上方状态栏（左上角位置）
             cv2.moveWindow(window_name, 0, 0)  # (x, y)坐标设置为(0, 0)，使窗口左上角对齐屏幕左上角
+            
+            # 强制设置窗口为置顶，确保它显示在最上层
+            try:
+                cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)  # 设置窗口为置顶
+            except Exception as e:
+                self.log_message(f"设置窗口置顶时出错: {str(e)}", "DEBUG")
             
             # 初始化帧时间戳，用于动态调整检测频率
             last_frame_time = datetime.datetime.now()
